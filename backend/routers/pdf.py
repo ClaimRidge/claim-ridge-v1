@@ -1,10 +1,13 @@
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import List, Optional
-from weasyprint import HTML
+from playwright.async_api import async_playwright
 from core.security import get_current_user
 import time
+
+logger = logging.getLogger(__name__)
 
 # --- Pydantic Models ---
 class ClaimDataModel(BaseModel):
@@ -89,18 +92,45 @@ router = APIRouter(prefix="/api/pdf", tags=["pdf"])
 @router.post("/generate-claim-pdf")
 async def generate_pdf(claim: ClaimDataModel, current_user = Depends(get_current_user)):
     try:
+        logger.info(f"PDF generation request from user {current_user.id}, claim: {claim.claimNumber}")
+        
         if not claim.claimNumber:
             claim.claimNumber = f"CR-{int(time.time())}"
-            
+            logger.debug(f"Generated claim number: {claim.claimNumber}")
+        
+        logger.debug(f"Generating HTML for claim {claim.claimNumber}")
         html_content = generate_html_from_claim(claim)
-        pdf_bytes = HTML(string=html_content).write_pdf()
+        
+        logger.debug(f"Converting HTML to PDF using Playwright for claim {claim.claimNumber}")
+        
+        # --- PLAYWRIGHT LOGIC STARTS HERE ---
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            
+            # Load the HTML content
+            await page.set_content(html_content)
+            
+            # Generate the PDF
+            pdf_bytes = await page.pdf(
+                format="A4",
+                print_background=True,  # Ensures background colors (like the table headers) are printed
+                margin={"top": "1cm", "right": "1cm", "bottom": "1cm", "left": "1cm"}
+            )
+            
+            await browser.close()
+        # --- PLAYWRIGHT LOGIC ENDS HERE ---
+
+        filename = f"{claim.claimNumber}_{claim.payerCode}.pdf"
+        logger.info(f"PDF generated successfully for claim {claim.claimNumber}, filename: {filename}")
         
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f'attachment; filename="{claim.claimNumber}_{claim.payerCode}.pdf"'
+                "Content-Disposition": f'attachment; filename="{filename}"'
             }
         )
     except Exception as e:
+        logger.error(f"PDF generation failed for claim {claim.claimNumber}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,9 +1,12 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from core.security import get_current_user
 from core.database import supabase
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # --- Pydantic Models ---
 class ReviewClaimRequest(BaseModel):
@@ -19,14 +22,19 @@ router = APIRouter(prefix="/api/insurer", tags=["insurer"])
 
 @router.post("/review-claim")
 async def review_claim(payload: ReviewClaimRequest, current_user = Depends(get_current_user)):
+    logger.info(f"Review claim request from insurer {current_user.id}, claim: {payload.claim_id}, action: {payload.action}")
+    
     profile_res = supabase.table("insurer_profiles").select("id").eq("user_id", current_user.id).execute()
     if not profile_res.data:
+        logger.warning(f"User {current_user.id} not authorized as insurer")
         raise HTTPException(status_code=403, detail="Not authorized as insurer")
     
     if payload.action not in ["approved", "rejected", "needs_info"]:
+        logger.warning(f"Invalid action '{payload.action}' attempted for claim {payload.claim_id}")
         raise HTTPException(status_code=400, detail="Invalid action")
         
     if payload.action == "rejected" and not (payload.reason and payload.reason.strip()):
+        logger.warning(f"Rejection without reason attempted for claim {payload.claim_id}")
         raise HTTPException(status_code=400, detail="Rejection reason is required")
 
     update_data = {
@@ -37,21 +45,29 @@ async def review_claim(payload: ReviewClaimRequest, current_user = Depends(get_c
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    logger.debug(f"Updating claim {payload.claim_id} with decision: {payload.action}")
     update_res = supabase.table("insurer_claims").update(update_data).eq("id", payload.claim_id).execute()
     if not update_res.data:
+        logger.error(f"Failed to update claim {payload.claim_id}")
         raise HTTPException(status_code=500, detail="Failed to update claim")
-        
+    
+    logger.info(f"Claim {payload.claim_id} updated with decision: {payload.action}")
     return {"claim": update_res.data[0]}
 
 
 async def run_auto_adjudicate(claim_id: str, user_id: str):
+    logger.debug(f"Starting auto-adjudication for claim {claim_id} by insurer {user_id}")
+    
     claim_res = supabase.table("insurer_claims").select("*").eq("id", claim_id).execute()
     if not claim_res.data:
+        logger.warning(f"Claim {claim_id} not found for auto-adjudication")
         return None
     claim = claim_res.data[0]
 
+    logger.debug(f"Loading adjudication rules for insurer {user_id}")
     rules_res = supabase.table("adjudication_rules").select("*").eq("insurer_id", user_id).eq("is_active", True).execute()
     rules = rules_res.data or []
+    logger.debug(f"Found {len(rules)} active adjudication rules")
 
     triggered_rules = []
     final_action = "auto_approve"
@@ -88,17 +104,21 @@ async def run_auto_adjudicate(claim_id: str, user_id: str):
                 triggered = True
 
         if triggered:
+            logger.debug(f"Rule '{rule.get('rule_name')}' triggered for claim {claim_id}")
             triggered_rules.append(rule["rule_name"])
             
             if rule["action"] == "auto_deny":
                 final_action = "auto_deny"
                 denial_code = rule.get("denial_code", "")
                 denial_reason = rule.get("denial_reason", "")
+                logger.info(f"Claim {claim_id} will be auto-denied due to rule '{rule.get('rule_name')}'")
             elif rule["action"] == "require_auth" and final_action != "auto_deny":
                 final_action = "require_auth"
             elif rule["action"] == "flag_for_review" and final_action == "auto_approve":
                 final_action = "flag_for_review"
 
+    logger.info(f"Auto-adjudication completed for claim {claim_id}, action: {final_action}, triggered rules: {len(triggered_rules)}")
+    
     update_data = {
         "adjudication_result": {"action": final_action, "triggered_rules": triggered_rules},
         "triggered_rules": triggered_rules,
@@ -112,12 +132,14 @@ async def run_auto_adjudicate(claim_id: str, user_id: str):
             "decision_reason": f"Auto-adjudicated: {denial_reason}",
             "decided_at": datetime.now(timezone.utc).isoformat()
         })
+        logger.info(f"Claim {claim_id} auto-denied")
     elif final_action == "auto_approve" and not triggered_rules:
         update_data.update({
             "status": "approved", 
             "decision_reason": "Auto-approved: passed all adjudication rules",
             "decided_at": datetime.now(timezone.utc).isoformat()
         })
+        logger.info(f"Claim {claim_id} auto-approved")
 
     supabase.table("insurer_claims").update(update_data).eq("id", claim_id).execute()
     return {"action": final_action, "triggered_rules": triggered_rules}
@@ -125,5 +147,6 @@ async def run_auto_adjudicate(claim_id: str, user_id: str):
 
 @router.post("/auto-adjudicate")
 async def auto_adjudicate_endpoint(payload: AutoAdjudicateRequest, current_user = Depends(get_current_user)):
+    logger.info(f"Auto-adjudicate request from user {current_user.id}, claim: {payload.claimId}")
     result = await run_auto_adjudicate(payload.claimId, current_user.id)
     return result

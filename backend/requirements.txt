@@ -2,8 +2,8 @@ fastapi
 uvicorn
 supabase
 pydantic
-weasyprint
 PyPDF2
 python-dotenv
 langchain
 langchain-openai
+playwright # after installation execute in cmd: playwright install chromium

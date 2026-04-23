@@ -1,8 +1,11 @@
 import json
 import re
+import logging
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from core.config import Config
+
+logger = logging.getLogger(__name__)
 
 EXTRACTION_PROMPT = """You are a medical claims document parser. Extract structured data from the attached medical claim document (PDF, image, or form scan).
 
@@ -130,13 +133,93 @@ Score thresholds for status:
 - Do NOT inflate scores to be nice. Real claims scrubbers reject ~20-30% of claims.
 - The corrected_claim must have the same field structure as the input."""
 
-def get_llm():
+def get_llm(model_name: str = Config.LLM_MODEL):
+    """Now accepts a model_name to allow switching between standard LLM and OCR"""
+    logger.debug(f"Initializing LLM with model: {model_name}")
     return ChatOpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=Config.OPENROUTER_API_KEY,
-        model=Config.LLM_MODEL,
+        model=model_name,
         temperature=0.3,
     )
 
 def extract_json_from_text(text: str) -> str:
-    pass
+    text = re.sub(r'```[\w]*\s*\n?', '', text)
+    
+    start_idx = text.find('{')
+    end_idx = text.rfind('}')
+    
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        return text[start_idx:end_idx + 1]
+    
+    return text.strip()
+
+async def extract_claim_from_document(file_base64: str, media_type: str) -> dict:
+    """
+    Extracts structured claim data from a base64 document using the new OCR Vision model.
+    """
+    # Grab the specific OCR model from your config
+    llm = get_llm(Config.OCR_MODEL) 
+    
+    # Format the image data properly for the Vision model
+    image_data_url = f"data:{media_type};base64,{file_base64}"
+    
+    # FIX: Combine the System instructions and User instructions into a single HumanMessage.
+    # Baidu's OCR model rejects separate SystemMessages for vision tasks.
+    messages = [
+        HumanMessage(content=[
+            {
+                "type": "text", 
+                "text": f"{EXTRACTION_PROMPT}\n\nExtract the claim data from this attached document:"
+            },
+            {
+                "type": "image_url", 
+                "image_url": {"url": image_data_url}
+            }
+        ])
+    ]
+    
+    response = await llm.ainvoke(messages)
+    json_str = extract_json_from_text(response.content)
+    
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"AI returned invalid JSON during extraction. Raw output: {json_str}") from e
+    
+async def scrub_claim(claim_data: dict) -> dict:
+    """
+    Scrubs the structured claim data against MENA medical billing rules and returns an adjudication report.
+    """
+    patient_name = claim_data.get('patient_name', 'Unknown')
+    logger.info(f"Starting claim scrub for patient: {patient_name}")
+    
+    # Grab the standard Text LLM from your config
+    llm = get_llm()
+    
+    # Convert the python dict back to a JSON string for the prompt
+    claim_json_str = json.dumps(claim_data, indent=2)
+    logger.debug(f"Converted claim data to JSON, length: {len(claim_json_str)}")
+    
+    messages = [
+        SystemMessage(content=SCRUB_SYSTEM_PROMPT),
+        HumanMessage(content=f"Analyze and scrub the following medical claim:\n\n{claim_json_str}")
+    ]
+    
+    logger.debug("Sending scrub request to LLM")
+    response = await llm.ainvoke(messages)
+    logger.debug(f"Received scrub response from LLM, response length: {len(response.content)}")
+    
+    json_str = extract_json_from_text(response.content)
+    logger.debug("Extracted JSON string from scrub response")
+    
+    try:
+        result = json.loads(json_str)
+        status = result.get('status', 'unknown')
+        score = result.get('overall_score', 0)
+        issues = len(result.get('issues', []))
+        logger.info(f"Claim scrub completed - patient: {patient_name}, status: {status}, score: {score}, issues: {issues}")
+        return result
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse scrub JSON for patient {patient_name}: {str(e)}")
+        raise ValueError(f"AI returned invalid JSON during scrubbing. Raw output: {json_str}") from e

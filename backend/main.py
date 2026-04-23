@@ -1,6 +1,8 @@
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import claims, insurer, pdf
+from core.config import logger
 
 app = FastAPI(title="ClaimRidge API")
 
@@ -18,6 +20,15 @@ app.include_router(claims.router)
 app.include_router(insurer.router)
 app.include_router(pdf.router)
 
+@app.on_event("startup")
+async def startup_event():
+    logger.info("ClaimRidge API starting up")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("ClaimRidge API shutting down")
+
 @app.get("/health")
 def health_check():
+    logger.debug("Health check endpoint called")
     return {"status": "ok"}

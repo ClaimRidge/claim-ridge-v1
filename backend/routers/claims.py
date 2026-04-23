@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
@@ -7,7 +8,11 @@ import random
 import string
 from core.security import get_current_user
 from core.database import supabase
-from services.ai_services import extract_claim_data_via_llm, scrub_claim_via_llm
+
+# Updated imports matching the new ai_services.py
+from services.ai_services import extract_claim_from_document, scrub_claim
+
+logger = logging.getLogger(__name__)
 
 # --- Pydantic Models ---
 class ExtractRequest(BaseModel):
@@ -38,39 +43,53 @@ def generate_claim_number():
 
 @router.post("/extract")
 async def extract_claim(payload: ExtractRequest, current_user = Depends(get_current_user)):
+    logger.info(f"Extract claim request from user {current_user.id}, file: {payload.fileName}")
     if not payload.fileBase64 or not payload.mediaType:
+        logger.warning("Extract claim request missing file data or media type")
         raise HTTPException(status_code=400, detail="Missing file data or media type")
 
     try:
-        extracted = await extract_claim_data_via_llm(payload.fileBase64, payload.mediaType)
+        logger.debug(f"Processing document extraction with media type: {payload.mediaType}")
+        # Calls the updated function with base64 and mediaType
+        extracted = await extract_claim_from_document(payload.fileBase64, payload.mediaType)
+        logger.info(f"Successfully extracted claim data from {payload.fileName}")
         return {"extracted": extracted, "fileName": payload.fileName}
     except Exception as e:
+        logger.error(f"Document extraction failed: {str(e)}")
         raise HTTPException(status_code=422, detail=f"Could not parse the document: {str(e)}")
 
 @router.post("/scrub")
-async def scrub_claim(claim_data: ClaimFormData, current_user = Depends(get_current_user)):
+async def scrub_claim_endpoint(claim_data: ClaimFormData, current_user = Depends(get_current_user)):
     user_id = current_user.id
+    logger.info(f"Scrub claim request from user {user_id}, patient: {claim_data.patient_name}")
     
     # 1. Save Initial Draft Claim to DB
     claim_payload = claim_data.model_dump()
+    claim_number = generate_claim_number()
     claim_payload.update({
         "user_id": user_id,
         "clinic_id": user_id,
-        "status": "draft",
-        "claim_number": generate_claim_number()
+        "status": "pending",
+        "claim_number": claim_number
     })
     
+    logger.debug(f"Saving draft claim {claim_number} to database")
     insert_res = supabase.table("claims").insert(claim_payload).execute()
     if not insert_res.data:
+        logger.error("Failed to save draft claim to database")
         raise HTTPException(status_code=500, detail="Failed to save claim")
     
     claim_id = insert_res.data[0]["id"]
+    logger.info(f"Draft claim saved with ID: {claim_id}, claim number: {claim_number}")
     
     # 2. Process via AI Service
     try:
-        claim_json_str = json.dumps(claim_data.model_dump(), indent=2)
-        scrub_result = await scrub_claim_via_llm(claim_json_str)
+        logger.debug(f"Starting AI scrub for claim {claim_id}")
+        # Calls the updated scrub function and passes the dictionary directly
+        scrub_result = await scrub_claim(claim_data.model_dump())
+        logger.info(f"AI scrub completed for claim {claim_id}, status: {scrub_result.get('status')}, score: {scrub_result.get('overall_score')}")
     except Exception as e:
+        logger.error(f"AI scrub failed for claim {claim_id}: {str(e)}")
         scrub_result = {
             "status": "warnings", 
             "overall_score": 70, 
@@ -85,14 +104,17 @@ async def scrub_claim(claim_data: ClaimFormData, current_user = Depends(get_curr
         }
     
     # 3. Update the Claim with Scrub Results
+    logger.debug(f"Updating claim {claim_id} with scrub results")
     supabase.table("claims").update({
         "status": "submitted",
         "scrub_result": scrub_result,
         "scrub_passed": scrub_result.get("status") == "clean",
         "scrub_warnings": len(scrub_result.get("issues", []))
     }).eq("id", claim_id).execute()
+    logger.info(f"Claim {claim_id} marked as submitted")
 
     # 4. Trigger Internal Auto-Adjudicate
+    logger.debug(f"Triggering auto-adjudication for claim {claim_id}")
     from routers.insurer import run_auto_adjudicate
     await run_auto_adjudicate(claim_id, user_id)
     
@@ -114,22 +136,29 @@ async def scrub_claim(claim_data: ClaimFormData, current_user = Depends(get_curr
     }
     
     try:
+        logger.debug(f"Creating audit trail for claim {claim_reference}")
         supabase.table("claims_audit").insert(audit_payload).execute()
+        logger.info(f"Audit trail created for claim {claim_reference}")
     except Exception as e:
-        print(f"[AUDIT] Insert failed: {e}")
+        logger.error(f"Failed to create audit trail for claim {claim_reference}: {e}")
     
+    logger.info(f"Claim scrubbing process completed for {claim_id}")
     return {"id": claim_id, **scrub_result}
 
 @router.post("/{id}/track-export")
 async def track_export(id: str, current_user = Depends(get_current_user)):
+    logger.info(f"Track export request from user {current_user.id} for claim {id}")
     reference = f"CR-{id[:8].upper()}"
     res = supabase.table("claims_audit").select("id, export_count").eq("claim_reference_number", reference).eq("user_id", current_user.id).execute()
     
     if not res.data:
+        logger.warning(f"Audit row not found for claim {reference}")
         raise HTTPException(status_code=404, detail="Audit row not found")
         
     row = res.data[0]
     new_count = (row.get("export_count") or 0) + 1
     
+    logger.debug(f"Updating export count to {new_count} for claim {reference}")
     supabase.table("claims_audit").update({"export_count": new_count}).eq("id", row["id"]).execute()
+    logger.info(f"Export tracked for claim {reference}, count: {new_count}")
     return {"export_count": new_count}
