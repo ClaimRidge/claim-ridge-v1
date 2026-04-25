@@ -1,227 +1,294 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { 
   Inbox, 
   ShieldCheck, 
-  Zap, 
-  AlertCircle, 
-  TrendingUp, 
+  CheckCircle, 
+  TrendingDown, 
+  Timer, 
   Clock, 
-  Activity,
-  ArrowUpRight,
-  Sparkles,
-  Search,
-  DollarSign,
-  Gavel,
-  History,
-  Workflow
+  ArrowRight, 
+  FileText, 
+  XCircle, 
+  Send, 
+  AlertTriangle,
+  ShieldAlert
 } from "lucide-react";
-import { formatJod } from "@/lib/utils/format";
+import { formatJod, formatRelativeTime } from "@/lib/utils/format";
 
-interface ModuleStatus {
+// --- Types ---
+interface InsurerClaim {
   id: string;
-  name: string;
-  icon: any;
-  status: "Active" | "Developing" | "Disabled";
-  value?: string | number;
-  label?: string;
-  href: string;
+  claim_number: string;
+  clinic_name: string;
+  patient_name: string;
+  amount_jod: number;
+  status: string;
+  submitted_at: string;
+  decided_at?: string;
+  created_at: string;
+  ai_risk_score?: number;
+}
+
+interface ActivityEvent {
+  id: string;
+  claim_number: string;
+  event: string;
+  time: string;
   color: string;
 }
 
+// --- Components ---
+function KpiCard({
+  label,
+  value,
+  icon: Icon,
+  color,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ElementType;
+  color: "green" | "amber" | "red" | "blue" | "navy" | "gray";
+}) {
+  const colorMap = {
+    green: { bg: "bg-[#f0fdf4]", border: "border-[#bbf7d0]", icon: "text-[#16a34a]", text: "text-[#16a34a]" },
+    amber: { bg: "bg-amber-50", border: "border-amber-200", icon: "text-amber-500", text: "text-amber-600" },
+    red: { bg: "bg-red-50", border: "border-red-200", icon: "text-red-500", text: "text-red-600" },
+    blue: { bg: "bg-blue-50", border: "border-blue-200", icon: "text-blue-500", text: "text-blue-600" },
+    navy: { bg: "bg-slate-50", border: "border-slate-200", icon: "text-[#0A1628]", text: "text-[#0A1628]" },
+    gray: { bg: "bg-[#f9fafb]", border: "border-[#e5e7eb]", icon: "text-[#6b7280]", text: "text-[#374151]" },
+  };
+  const c = colorMap[color];
+
+  return (
+    <div className="bg-white border border-[#e5e7eb] rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex items-center justify-between mb-3">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${c.bg} ${c.border} border shadow-sm`}>
+          <Icon className={`h-5 w-5 ${c.icon}`} />
+        </div>
+      </div>
+      <p className={`font-display text-2xl font-bold tracking-tight ${c.text}`}>{value}</p>
+      <p className="text-xs font-semibold text-[#9ca3af] mt-1 uppercase tracking-wider">{label}</p>
+    </div>
+  );
+}
+
+function RiskScoreBadge({ score }: { score?: number }) {
+  if (score === undefined) return null;
+  
+  let color = "bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0]";
+  if (score >= 70) color = "bg-red-50 text-red-600 border-red-200";
+  else if (score >= 30) color = "bg-amber-50 text-amber-600 border-amber-200";
+
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${color}`}>
+      Risk: {score}%
+    </span>
+  );
+}
+
+// --- Helper Functions ---
+function daysAgo(dateStr: string): number {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
+}
+
+function hoursAgo(start: string, end: string): number {
+  return Math.round((new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60));
+}
+
+// --- Main Page ---
 export default function InsurerDashboardPage() {
-  const [claimsCount, setClaimsCount] = useState(0);
-  const [exposure, setExposure] = useState(0);
+  const [claims, setClaims] = useState<InsurerClaim[]>([]);
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
 
-  useEffect(() => {
-    async function loadStats() {
-      const { data } = await supabase.from("insurer_claims").select("amount_jod, status");
-      if (data) {
-        setClaimsCount(data.length);
-        const pending = data.filter(c => c.status === "pending" || c.status === "under_review");
-        setExposure(pending.reduce((acc, curr) => acc + Number(curr.amount_jod), 0));
-      }
-      setLoading(false);
-    }
-    loadStats();
-  }, []);
+  const fetchClaims = useCallback(async () => {
+    // In a real app, we would filter by the current insurer's ID
+    const { data } = await supabase
+      .from("insurer_claims")
+      .select("*")
+      .order("submitted_at", { ascending: false });
 
-  const modules: ModuleStatus[] = [
-    { id: "M1", name: "Intake Engine", icon: Inbox, status: "Active", value: claimsCount, label: "Total Claims", href: "/dashboard/insurance/claims", color: "blue" },
-    { id: "M2", name: "Eligibility", icon: ShieldCheck, status: "Developing", value: "99.2%", label: "Accuracy", href: "/dashboard/insurance/policies", color: "green" },
-    { id: "M3", name: "Pricing Core", icon: DollarSign, status: "Developing", value: "v2.1", label: "Tariff v2", href: "/dashboard/insurance/policies", color: "amber" },
-    { id: "M4", name: "Medical Review", icon: Activity, status: "Developing", value: "AI Assisted", label: "Protocol v4", href: "/dashboard/insurance/claims", color: "indigo" },
-    { id: "M5", name: "Fraud Watch", icon: Search, status: "Developing", value: 12, label: "Flags Today", href: "/dashboard/insurance/fraud", color: "red" },
-    { id: "M6", name: "Adjudication", icon: Gavel, status: "Developing", value: "72%", label: "Auto-rate", href: "/dashboard/insurance/policies", color: "purple" },
-    { id: "M7", name: "Payment Hub", icon: Workflow, status: "Developing", value: "Weekly", label: "Cycle", href: "/dashboard/insurance/payments", color: "cyan" },
-    { id: "M8", name: "Appeals", icon: History, status: "Developing", value: "48h", label: "Avg SLA", href: "/dashboard/insurance/appeals", color: "rose" },
-    { id: "M9", name: "Analytics", icon: TrendingUp, status: "Developing", value: "Real-time", label: "Sync", href: "/dashboard/insurance/analytics", color: "emerald" },
-    { id: "M10", name: "Compliance", icon: Clock, status: "Developing", value: "Immutable", label: "Event Log", href: "/dashboard/insurance/audit", color: "slate" },
-  ];
+    if (data) setClaims(data as InsurerClaim[]);
+    setLoading(false);
+  }, [supabase]);
+
+  useEffect(() => {
+    fetchClaims();
+    const interval = setInterval(fetchClaims, 60000);
+    return () => clearInterval(interval);
+  }, [fetchClaims]);
+
+  const stats = useMemo(() => {
+    const now = new Date();
+    const todayStr = now.toISOString().split("T")[0];
+    
+    const receivedToday = claims.filter(c => c.created_at.split("T")[0] === todayStr).length;
+    const pendingReview = claims.filter(c => c.status === "pending" || c.status === "under_review").length;
+    const autoApprovedToday = claims.filter(c => c.status === "approved" && c.decided_at?.split("T")[0] === todayStr).length;
+    const totalExposure = claims.filter(c => c.status === "pending" || c.status === "under_review").reduce((s, c) => s + Number(c.amount_jod), 0);
+    
+    const reviewed = claims.filter(c => c.decided_at && c.submitted_at);
+    const avgProcessingHrs = reviewed.length > 0 ? Math.round(reviewed.reduce((s, c) => s + hoursAgo(c.submitted_at, c.decided_at!), 0) / reviewed.length) : 0;
+    
+    return { receivedToday, pendingReview, autoApprovedToday, totalExposure, avgProcessingHrs };
+  }, [claims]);
+
+  const actionClaims = useMemo(() => 
+    claims.filter(c => c.status === "pending" || c.status === "under_review")
+          .sort((a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime())
+          .slice(0, 10), 
+  [claims]);
+
+  const activityFeed: ActivityEvent[] = useMemo(() => {
+    const events: ActivityEvent[] = [];
+    claims.slice(0, 20).forEach(c => {
+      events.push({ id: `${c.id}-sub`, claim_number: c.claim_number, event: "Claim submitted", time: c.submitted_at, color: "text-blue-500" });
+      if (c.decided_at) {
+        events.push({ 
+          id: `${c.id}-dec`, 
+          claim_number: c.claim_number, 
+          event: c.status === "approved" ? "Claim approved" : "Claim rejected", 
+          time: c.decided_at, 
+          color: c.status === "approved" ? "text-[#16a34a]" : "text-red-500" 
+        });
+      }
+    });
+    return events.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 15);
+  }, [claims]);
+
+  const EVENT_ICONS: Record<string, React.ElementType> = {
+    "Claim submitted": Send,
+    "Claim approved": CheckCircle,
+    "Claim rejected": XCircle,
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#05080d] flex items-center justify-center">
-        <div className="relative">
-          <div className="h-24 w-24 border-4 border-white/5 border-t-emerald-500 rounded-full animate-spin" />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Zap className="h-8 w-8 text-emerald-500 animate-pulse" />
-          </div>
-        </div>
+      <div className="min-h-[60vh] flex flex-col items-center justify-center p-8">
+        <div className="animate-spin h-8 w-8 border-4 border-[#16a34a] border-t-transparent rounded-full mb-4" />
+        <p className="text-[#9ca3af] text-sm animate-pulse">Loading operations data...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#05080d] text-white p-6 lg:p-10 font-sans selection:bg-emerald-500/30">
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12">
+      {/* Welcome Header */}
+      <div className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
-          <div className="flex items-center gap-2 mb-3">
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-emerald-500 font-mono text-xs tracking-widest uppercase">System Operational</span>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#f0faf4] text-[#16a34a] border border-[#dcfce7] uppercase tracking-wider">
+              System Active
+            </span>
           </div>
-          <h1 className="text-4xl md:text-5xl font-black tracking-tight text-white mb-2">
-            Command <span className="text-emerald-500">Center</span>
+          <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-[#0a0a0a] tracking-tight">
+            Payer Command <span className="text-[#16a34a]">Center</span>
           </h1>
-          <p className="text-slate-400 max-w-md">
-            Next-generation payer adjudication interface monitoring 10 core AI-driven modules.
+          <p className="text-[#6b7280] text-sm sm:text-base mt-2 max-w-lg">
+            Monitor incoming medical claims, adjudicate risk profiles, and manage your network efficiency.
           </p>
         </div>
-
-        <div className="flex gap-4">
-          <div className="bg-white/5 border border-white/10 p-4 rounded-2xl backdrop-blur-xl">
-            <p className="text-slate-500 text-xs font-bold uppercase mb-1">Active Exposure</p>
-            <p className="text-2xl font-mono font-bold text-white tracking-tighter">{formatJod(exposure)}</p>
+        <div className="flex items-center gap-4 bg-white border border-[#e5e7eb] rounded-2xl p-4 shadow-sm">
+          <div className="w-10 h-10 rounded-full bg-[#f9fafb] border border-[#e5e7eb] flex items-center justify-center text-[#6b7280]">
+            <Clock className="h-5 w-5" />
           </div>
-          <Link 
-            href="/dashboard/insurance/claims"
-            className="bg-emerald-500 hover:bg-emerald-400 text-black px-6 py-4 rounded-2xl font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95"
-          >
-            Run Batch Adjudication <ArrowUpRight className="h-5 w-5" />
-          </Link>
+          <div>
+            <p className="text-[10px] font-bold text-[#9ca3af] uppercase tracking-widest leading-none mb-1">Last Sync</p>
+            <p className="text-sm font-bold text-[#374151] leading-none">Just now</p>
+          </div>
         </div>
       </div>
 
-      {/* Module Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5 mb-10">
-        {modules.map((m) => (
-          <Link 
-            key={m.id} 
-            href={m.href}
-            className="group relative bg-white/[0.03] border border-white/10 p-6 rounded-3xl hover:bg-white/[0.07] hover:border-emerald-500/30 transition-all duration-500 overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-100 transition-opacity">
-              <m.icon className="h-12 w-12 text-emerald-500" />
-            </div>
-            
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-tighter">{m.id}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  m.status === "Active" ? "bg-emerald-500/10 text-emerald-500" : "bg-white/5 text-slate-400"
-                }`}>
-                  {m.status}
-                </span>
-              </div>
-              
-              <h3 className="text-lg font-bold text-white mb-6 group-hover:text-emerald-400 transition-colors">{m.name}</h3>
-              
-              <div>
-                <p className="text-2xl font-mono font-bold text-white leading-none mb-1">{m.value || "---"}</p>
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{m.label}</p>
-              </div>
-            </div>
-            
-            {/* Glow effect on hover */}
-            <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-emerald-500/10 blur-[60px] opacity-0 group-hover:opacity-100 transition-opacity" />
-          </Link>
-        ))}
+      {/* KPI Bar */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+        <KpiCard label="Received Today" value={stats.receivedToday} icon={Inbox} color="blue" />
+        <KpiCard label="Pending Review" value={stats.pendingReview} icon={Timer} color="amber" />
+        <KpiCard label="Auto-Approved" value={stats.autoApprovedToday} icon={CheckCircle} color="green" />
+        <KpiCard label="Active Exposure" value={`${stats.totalExposure.toLocaleString()} JOD`} icon={ShieldAlert} color="red" />
+        <KpiCard label="Avg Response" value={`${stats.avgProcessingHrs}h`} icon={Clock} color="navy" />
       </div>
 
-      {/* Main Content Area */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Adjudication Pipeline */}
-        <div className="lg:col-span-2 bg-white/[0.02] border border-white/10 rounded-[40px] p-8 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-8">
-             <Sparkles className="h-6 w-6 text-emerald-500 opacity-20" />
+      {/* Main Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+        {/* Claims Table */}
+        <div className="lg:col-span-3 bg-white border border-[#e5e7eb] rounded-[32px] shadow-sm overflow-hidden flex flex-col">
+          <div className="px-8 py-6 border-b border-[#f3f4f6] flex items-center justify-between">
+            <h2 className="font-display font-bold text-[#0a0a0a] text-lg">Incoming Queue</h2>
+            <Link href="/dashboard/insurance/claims" className="text-sm text-[#16a34a] hover:text-[#15803d] font-bold inline-flex items-center gap-1 group">
+              Full list <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+            </Link>
           </div>
           
-          <h2 className="text-2xl font-black mb-8 flex items-center gap-3">
-            Processing Pipeline <span className="text-xs font-mono font-normal text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded">Live</span>
-          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-[#f9fafb] text-left border-b border-[#f3f4f6]">
+                  <th className="px-6 py-4 text-xs font-bold text-[#9ca3af] uppercase tracking-wider">Claim #</th>
+                  <th className="px-6 py-4 text-xs font-bold text-[#9ca3af] uppercase tracking-wider">Provider</th>
+                  <th className="px-6 py-4 text-xs font-bold text-[#9ca3af] uppercase tracking-wider">Amount</th>
+                  <th className="px-6 py-4 text-xs font-bold text-[#9ca3af] uppercase tracking-wider">Risk</th>
+                  <th className="px-6 py-4 text-xs font-bold text-[#9ca3af] uppercase tracking-wider">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#f3f4f6]">
+                {actionClaims.map((c) => (
+                  <tr key={c.id} className="hover:bg-[#f9fafb] transition-colors group">
+                    <td className="px-6 py-4 font-mono text-sm text-[#0a0a0a] font-medium">{c.claim_number}</td>
+                    <td className="px-6 py-4 text-sm text-[#374151]">{c.clinic_name}</td>
+                    <td className="px-6 py-4 text-sm font-bold text-[#0a0a0a]">{formatJod(Number(c.amount_jod))}</td>
+                    <td className="px-6 py-4"><RiskScoreBadge score={c.ai_risk_score} /></td>
+                    <td className="px-6 py-4">
+                      <Link href={`/dashboard/insurance/claims/${c.id}`} className="text-xs font-bold bg-[#f9fafb] border border-[#e5e7eb] px-3 py-1.5 rounded-lg hover:bg-[#16a34a] hover:text-white hover:border-[#16a34a] transition-all">
+                        Review
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {actionClaims.length === 0 && (
+              <div className="p-12 text-center">
+                <CheckCircle className="h-12 w-12 text-[#dcfce7] mx-auto mb-4" />
+                <p className="text-[#9ca3af] font-medium">All claims processed!</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Activity Feed */}
+        <div className="lg:col-span-2 bg-white border border-[#e5e7eb] rounded-[32px] shadow-sm p-8">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="font-display font-bold text-[#0a0a0a] text-lg">Live Feed</h2>
+            <div className="flex gap-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-[#16a34a] animate-pulse" />
+              <div className="w-1.5 h-1.5 rounded-full bg-[#16a34a]/40" />
+            </div>
+          </div>
           
           <div className="space-y-6">
-            {[
-              { label: "Intake & Normalization", progress: 100, status: "Operational", count: 1420 },
-              { label: "Medical Necessity Review", progress: 65, status: "Active", count: 284 },
-              { label: "Fraud Pattern Scanning", progress: 85, status: "Active", count: 12 },
-              { label: "Final Adjudication", progress: 30, status: "Queued", count: 92 }
-            ].map((step, i) => (
-              <div key={i} className="space-y-2">
-                <div className="flex justify-between text-xs font-bold uppercase tracking-widest">
-                  <span className="text-slate-400">{step.label}</span>
-                  <span className="text-emerald-500">{step.count} Claims</span>
+            {activityFeed.map((event) => {
+              const Icon = EVENT_ICONS[event.event] || FileText;
+              return (
+                <div key={event.id} className="flex gap-4">
+                  <div className={`mt-1 w-8 h-8 rounded-full border flex items-center justify-center flex-shrink-0 ${event.color.replace('text-', 'bg-').replace('500', '50')} ${event.color.replace('text-', 'border-').replace('500', '200')}`}>
+                    <Icon className={`h-4 w-4 ${event.color}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-start">
+                      <p className="text-sm font-bold text-[#374151] truncate">{event.event}</p>
+                      <span className="text-[10px] font-medium text-[#9ca3af] whitespace-nowrap ml-2">{formatRelativeTime(event.time)}</span>
+                    </div>
+                    <p className="text-xs font-mono text-[#9ca3af] mt-0.5">{event.claim_number}</p>
+                  </div>
                 </div>
-                <div className="h-3 bg-white/5 rounded-full overflow-hidden p-0.5">
-                  <div 
-                    className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full transition-all duration-1000"
-                    style={{ width: `${step.progress}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-        </div>
-
-        {/* System Health */}
-        <div className="bg-[#0A1628] rounded-[40px] p-8 border border-white/5 flex flex-col justify-between">
-           <div>
-              <h2 className="text-2xl font-black mb-2">Neural Engine</h2>
-              <p className="text-slate-400 text-sm mb-8">Platform performance and AI decision confidence metrics.</p>
-              
-              <div className="space-y-8">
-                <div className="flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center">
-                    <Zap className="h-6 w-6 text-emerald-500" />
-                  </div>
-                  <div>
-                    <p className="text-white font-bold">142ms</p>
-                    <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">Inference Latency</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-blue-500/10 flex items-center justify-center">
-                    <ShieldCheck className="h-6 w-6 text-blue-500" />
-                  </div>
-                  <div>
-                    <p className="text-white font-bold">98.4%</p>
-                    <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">Decision Confidence</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-amber-500/10 flex items-center justify-center">
-                    <AlertCircle className="h-6 w-6 text-amber-500" />
-                  </div>
-                  <div>
-                    <p className="text-white font-bold">3.2%</p>
-                    <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">Manual Override Rate</p>
-                  </div>
-                </div>
-              </div>
-           </div>
-           
-           <div className="mt-8 pt-8 border-t border-white/5">
-              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Platform Version</p>
-              <p className="text-white font-mono text-sm">CLAIMRIDGE-CORE v3.11.0</p>
-           </div>
         </div>
       </div>
     </div>

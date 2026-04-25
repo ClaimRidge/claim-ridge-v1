@@ -8,7 +8,6 @@ import Input from "@/components/ui/Input";
 import { Plus, X, Send, Upload, FileText, Sparkles, CheckCircle, Search } from "lucide-react";
 import CodePicker from "@/components/CodePicker";
 import PayerPicker from "@/components/PayerPicker";
-import ProviderPicker from "@/components/ProviderPicker";
 import { ICD10_CODES } from "@/data/icd10";
 import { CPT_CODES } from "@/data/cpt";
 import { Payer } from "@/data/payers";
@@ -75,8 +74,8 @@ export default function ClaimForm() {
   >(null);
 
   const [payerPickerOpen, setPayerPickerOpen] = useState(false);
-  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
   const [providerIdHint, setProviderIdHint] = useState<string>("");
+  const [registeredPayerUuid, setRegisteredPayerUuid] = useState<string | null>(null);
 
   const handleProviderSelect = (provider: Provider) => {
     setForm((prev) => ({
@@ -86,8 +85,10 @@ export default function ClaimForm() {
     }));
   };
 
-  const handlePayerSelect = (payer: Payer) => {
+  const handlePayerSelect = (payer: any) => {
     setForm((prev) => ({ ...prev, payer_name: payer.name }));
+    setRegisteredPayerUuid(payer.id || null);
+    
     if (payer.providerIdFormat) {
       setProviderIdHint(payer.providerIdFormat);
       setForm((prev) => ({
@@ -103,6 +104,10 @@ export default function ClaimForm() {
 
   const updateField = (field: keyof ClaimFormData, value: string | number) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+    
+    if (field === "payer_name") {
+      setRegisteredPayerUuid(null);
+    }
   };
 
   const updateArrayField = (field: "diagnosis_codes" | "procedure_codes", index: number, value: string) => {
@@ -216,21 +221,30 @@ export default function ClaimForm() {
     const { data: { session } } = await supabase.auth.getSession();
 
     try {
+      const payload = {
+        ...form,
+        payer_name: form.payer_name,
+        payer_id: registeredPayerUuid || form.payer_name, 
+        member_id: form.payer_id, 
+      };
+
       const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/claims/scrub`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
           "Authorization": `Bearer ${session?.access_token}`
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || "Failed to scrub claim");
+        throw new Error(data.detail?.message || data.error || "Failed to scrub claim");
       }
 
       const data = await res.json();
+      
+      // FIX: Redirect back to the Scrub Results page!
       router.push(`/claims/${data.id}/results`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -381,15 +395,6 @@ export default function ClaimForm() {
                 required
               />
             </div>
-            <button
-              type="button"
-              onClick={() => setProviderPickerOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium text-[#16a34a] hover:text-white hover:bg-[#16a34a] border border-[#bbf7d0] hover:border-[#16a34a] rounded-lg transition-colors mb-0.5"
-              title="Browse hospitals & clinics"
-            >
-              <Search className="h-4 w-4" />
-              <span className="hidden sm:inline">Browse</span>
-            </button>
           </div>
           <div>
             <Input
@@ -585,16 +590,9 @@ export default function ClaimForm() {
       <div className="flex justify-end pt-4 border-t border-[#e5e7eb]">
         <Button type="submit" loading={loading} size="lg" className="gap-2 w-full sm:w-auto">
           <Send className="h-4 w-4" />
-          Scrub Claim with AI
+          Submit Claim to Insurer
         </Button>
       </div>
-
-      {/* Provider/Facility Browser Modal */}
-      <ProviderPicker
-        isOpen={providerPickerOpen}
-        onClose={() => setProviderPickerOpen(false)}
-        onSelect={handleProviderSelect}
-      />
 
       {/* Payer Browser Modal */}
       <PayerPicker
