@@ -55,17 +55,17 @@ export default function InsurerLayout({ children }: { children: React.ReactNode 
       setUser(user);
 
       const { data: profile } = await supabase
-        .from("insurer_profiles")
-        .select("company_name")
-        .eq("user_id", user.id)
+        .from("profiles")
+        .select("organization_name, account_type")
+        .eq("id", user.id)
         .maybeSingle();
 
-      if (!profile) {
+      if (profile?.account_type !== "insurance") {
         router.push("/dashboard");
         return;
       }
 
-      setCompanyName(profile.company_name);
+      setCompanyName(profile.organization_name || "Insurance Partner");
       setAuthorized(true);
       setLoading(false);
     };

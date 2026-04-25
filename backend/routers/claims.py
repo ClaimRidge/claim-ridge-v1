@@ -68,26 +68,29 @@ async def scrub_claim_endpoint(claim_data: ClaimFormData, current_user = Depends
     user_id = current_user.id
     claim_number = generate_claim_number()
     
-    # Resolve Entities securely
+    # 1. Resolve Entities dynamically against the 'profiles' table
     resolved_payer_id = None
-    resolved_provider_id = None
+    
+    # Check if the frontend sent us a direct UUID from the PayerPicker
+    if is_valid_uuid(claim_data.payer_id):
+        resolved_payer_id = claim_data.payer_id
+    else:
+        # Otherwise search the profiles table
+        try:
+            payer_search = supabase.table("profiles").select("id").eq("account_type", "insurance").ilike("organization_name", claim_data.payer_name).execute()
+            if payer_search.data:
+                resolved_payer_id = payer_search.data[0]["id"]
+        except Exception as e:
+            logger.warning(f"Registered payer lookup failed: {e}")
 
-    try:
-        payer_search = supabase.table("directory_entities").select("id").eq("entity_type", "insurer").ilike("name_en", claim_data.payer_name).execute()
-        if payer_search.data and is_valid_uuid(payer_search.data[0]["id"]):
-            resolved_payer_id = payer_search.data[0]["id"]
-            
-        provider_search = supabase.table("directory_entities").select("id").eq("entity_type", "clinic").ilike("name_en", claim_data.provider_name).execute()
-        if provider_search.data and is_valid_uuid(provider_search.data[0]["id"]):
-            resolved_provider_id = provider_search.data[0]["id"]
-    except Exception as e:
-        logger.warning(f"Lookup failed, proceeding with raw names: {e}")
+    # Default provider to the submitting clinic
+    resolved_provider_id = current_user.id
 
-    # Build the Payload exactly as it was when it worked for you
+    # 2. Build the Payload
     claim_payload = {
         "id": str(uuid.uuid4()), 
         "claim_number": claim_number,
-        "status": "intake_complete", 
+        "status": "pending", # Initial status before AI
         "user_id": user_id,
         "clinic_id": user_id,       
         "provider_id": resolved_provider_id, 
@@ -112,20 +115,21 @@ async def scrub_claim_endpoint(claim_data: ClaimFormData, current_user = Depends
 
     db_generated_id = insert_res.data[0]["id"]
 
-    # Process via AI Service
+    # 3. Process via AI Service (This brings back your missing results!)
     try:
         scrub_result = await scrub_claim(claim_data.model_dump())
     except Exception as e:
         logger.error(f"AI scrub failed: {e}")
         scrub_result = {"status": "error", "issues": [{"message": str(e)}], "overall_score": 0}
     
-    # Update with Results using the exact Database ID
+    # 4. Update with Results using the exact Database ID
     supabase.table("claims").update({
-        "status": "submitted",
+        "status": "submitted", # FIX: This restores the proper "submitted" status!
         "scrub_result": scrub_result,
         "ai_risk_score": scrub_result.get("overall_score", 0)
     }).eq("id", db_generated_id).execute()
 
+    # 5. Insert Audit Trail
     try:
         claim_reference = f"CR-{db_generated_id[:8].upper()}"
         audit_payload = {

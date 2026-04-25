@@ -3,11 +3,10 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { User } from "@supabase/supabase-js";
-import { UserCircle, Bell, Shield, Building2, Save, Loader2, CheckCircle2 } from "lucide-react";
+import { Building2, Save, Loader2, CheckCircle2 } from "lucide-react";
 
 export default function InsurerSettingsPage() {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -23,23 +22,22 @@ export default function InsurerSettingsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setUser(user);
-        const { data: prof } = await supabase
-          .from("insurer_profiles")
-          .select("*")
-          .eq("user_id", user.id)
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("organization_name")
+          .eq("id", user.id)
           .single();
         
-        if (prof) {
-          setProfile(prof);
+        if (profile) {
           setFormData({
-            companyName: prof.company_name || "",
+            companyName: profile.organization_name || "",
           });
         }
       }
       setLoading(false);
     }
     loadData();
-  }, []);
+  }, [supabase]);
 
   const handleSave = async () => {
     if (!user) return;
@@ -47,19 +45,17 @@ export default function InsurerSettingsPage() {
     setSuccess(false);
 
     const { error } = await supabase
-      .from("insurer_profiles")
+      .from("profiles")
       .update({
-        company_name: formData.companyName,
+        organization_name: formData.companyName,
         updated_at: new Date().toISOString(),
       })
-      .eq("user_id", user.id);
+      .eq("id", user.id);
 
     setSaving(false);
     if (!error) {
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
-    } else {
-      console.error("Failed to save profile", error);
     }
   };
 
@@ -92,7 +88,6 @@ export default function InsurerSettingsPage() {
               value={user?.email || ""}
               className="w-full px-4 py-2 bg-[#f9fafb] border border-[#e5e7eb] rounded-lg text-[#6b7280] sm:text-sm cursor-not-allowed"
             />
-            <p className="mt-1.5 text-xs text-[#9ca3af]">Your admin email address cannot be changed from here.</p>
           </div>
           
           <div>
@@ -106,7 +101,7 @@ export default function InsurerSettingsPage() {
                 value={formData.companyName}
                 onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                 className="w-full pl-10 pr-4 py-2 bg-white border border-[#d1d5db] rounded-lg text-[#0a0a0a] focus:ring-2 focus:ring-[#0A1628]/20 focus:border-[#0A1628] outline-none transition-shadow sm:text-sm"
-                placeholder="e.g. Acme Insurance"
+                placeholder="e.g. Jordan Insurance Co."
               />
             </div>
           </div>

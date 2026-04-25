@@ -1,10 +1,31 @@
-import UnderConstruction from "@/components/dashboard/insurance/UnderConstruction";
+"use client";
 
-export default function AppealsPage() {
+import Link from "next/link";
+import { LayoutDashboard, History } from "lucide-react";
+import Button from "@/components/ui/Button";
+
+export default function InsurerAppealsComingSoon() {
   return (
-    <UnderConstruction 
-      moduleName="Appeals Management" 
-      description="Structured dispute intake, AI-pre-triage, and SLA-compliant resolution workflows." 
-    />
+    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#f9fafb]">
+      <div className="max-w-md w-full text-center">
+        <div className="w-16 h-16 bg-[#f0faf4] border border-[#dcfce7] rounded-2xl flex items-center justify-center mx-auto mb-6">
+          <History className="h-8 w-8 text-[#16a34a]" />
+        </div>
+        <h1 className="text-3xl font-bold text-[#0a0a0a] mb-3 font-display">
+          Module Under Construction
+        </h1>
+        <p className="text-[#6b7280] mb-8 leading-relaxed">
+          The <strong>Appeals & Disputes Portal</strong> is currently being finalized. 
+          Expect a streamlined workflow for handling provider disagreements soon.
+        </p>
+        
+        <Link href="/dashboard/insurance">
+          <Button className="gap-2 px-8">
+            <LayoutDashboard className="h-4 w-4" />
+            Back to Dashboard
+          </Button>
+        </Link>
+      </div>
+    </div>
   );
 }

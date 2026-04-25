@@ -39,10 +39,10 @@ CREATE TABLE public.claim_lines (
 );
 CREATE TABLE public.claims (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
-  provider_id uuid NOT NULL,
-  payer_id uuid NOT NULL,
-  member_id text NOT NULL,
-  service_date date NOT NULL,
+  provider_id uuid,
+  payer_id uuid,
+  member_id text,
+  date_of_service date NOT NULL,
   status text NOT NULL DEFAULT 'intake_complete'::text,
   total_billed numeric NOT NULL DEFAULT 0,
   total_allowed numeric DEFAULT 0,
@@ -65,6 +65,8 @@ CREATE TABLE public.claims (
   scrub_result jsonb DEFAULT '{}'::jsonb,
   scrub_passed boolean DEFAULT false,
   scrub_warnings integer DEFAULT 0,
+  payer_name_raw text,
+  needs_entity_mapping boolean DEFAULT false,
   CONSTRAINT claims_pkey PRIMARY KEY (id),
   CONSTRAINT claims_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT claims_clinic_id_fkey FOREIGN KEY (clinic_id) REFERENCES auth.users(id)
@@ -86,18 +88,6 @@ CREATE TABLE public.claims_audit (
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT claims_audit_pkey PRIMARY KEY (id),
   CONSTRAINT claims_audit_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
-);
-CREATE TABLE public.directory_entities (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  entity_type text NOT NULL CHECK (entity_type = ANY (ARRAY['clinic'::text, 'insurer'::text])),
-  name_en text NOT NULL,
-  name_ar text,
-  country text DEFAULT 'Jordan'::text,
-  city text,
-  license_number text UNIQUE,
-  is_verified boolean DEFAULT true,
-  created_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT directory_entities_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.profiles (
   id uuid NOT NULL,

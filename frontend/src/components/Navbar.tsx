@@ -31,8 +31,14 @@ export default function Navbar() {
     return () => subscription.unsubscribe();
   }, [supabase]);
 
-  // Show Navbar ONLY on the home page and dashboard page
-  if (pathname !== "/dashboard" && pathname !== "/") {
+  // Show Navbar on home, dashboards, claims, and settings
+  const showNavbar = 
+    pathname === "/" || 
+    pathname.startsWith("/dashboard") || 
+    pathname.startsWith("/claims") || 
+    pathname.startsWith("/settings");
+
+  if (!showNavbar) {
     return null;
   }
 

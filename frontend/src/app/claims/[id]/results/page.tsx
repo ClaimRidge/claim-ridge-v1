@@ -332,9 +332,10 @@ export default function ResultsPage() {
     );
   }
 
-  const errorCount = result.issues.filter((i) => i.severity === "error").length;
-  const warningCount = result.issues.filter((i) => i.severity === "warning").length;
-  const infoCount = result.issues.filter((i) => i.severity === "info").length;
+  const issues = result.issues || [];
+  const errorCount = issues.filter((i) => i.severity === "error").length;
+  const warningCount = issues.filter((i) => i.severity === "warning").length;
+  const infoCount = issues.filter((i) => i.severity === "info").length;
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -385,7 +386,7 @@ export default function ResultsPage() {
                   <Info className="h-4 w-4" /> {infoCount} suggestion{infoCount > 1 ? "s" : ""}
                 </span>
               )}
-              {result.issues.length === 0 && (
+              {issues.length === 0 && (
                 <span className="flex items-center gap-1 text-sm text-[#16a34a]">
                   <CheckCircle className="h-4 w-4" /> No issues found
                 </span>
@@ -396,11 +397,11 @@ export default function ResultsPage() {
       </div>
 
       {/* Issues */}
-      {result.issues.length > 0 && (
+      {issues.length > 0 && (
         <div className="bg-white border border-[#e5e7eb] rounded-xl shadow-sm p-6 md:p-8 mb-6">
           <h3 className="font-display text-lg font-bold text-[#0a0a0a] mb-4">Issues Found</h3>
           <div className="space-y-4">
-            {result.issues.map((issue, i) => (
+            {issues.map((issue, i) => (
               <div
                 key={i}
                 className={`flex gap-3 p-4 rounded-lg border ${
