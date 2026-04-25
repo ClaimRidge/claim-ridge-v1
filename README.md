@@ -47,4 +47,4 @@ ClaimRidge is an AI-powered insurance compliance platform that ensures medical c
 - ✅ Keep components small and single responsibility
 - ✅ Always handle loading and error states
 - ✅ Mobile responsive design always
----
+  
