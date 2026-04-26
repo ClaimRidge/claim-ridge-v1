@@ -41,10 +41,6 @@ export default function PipelinePage() {
   const totalClaims = claims.length;
   const totalBilled = claims.reduce((sum, c) => sum + (Number(c.total_billed) || 0), 0);
   
-  // Logic for revenue saved (approximation: 10% of total billed if we don't have a direct field)
-  // Or just use 0 if we don't want to guess. The user said "lack data".
-  // Actually, let's just show Total Claims, Total Billed, and Denial Rate.
-  
   const approvedCount = claims.filter(c => c.status === "approved").length;
   const deniedCount = claims.filter(c => ["denied", "rejected"].includes(c.status)).length;
   const decidedCount = approvedCount + deniedCount;
