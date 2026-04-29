@@ -1,11 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRef, useState, useEffect } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { ClaimFormData } from "@/types/claim";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
-import { Plus, X, Send, Upload, FileText, Sparkles, CheckCircle, Search, AlertTriangle } from "lucide-react";
+import { Plus, X, Send, Upload, FileText, Sparkles, CheckCircle, Search, AlertTriangle, Building2 } from "lucide-react";
 import CodePicker from "@/components/CodePicker";
 import PayerPicker from "@/components/PayerPicker";
 import { ICD10_CODES } from "@/data/icd10";
@@ -68,6 +68,52 @@ export default function ClaimForm() {
   // NEW: State to track AI confidence for UI highlighting
   const [extractedScores, setExtractedScores] = useState<Record<string, number | undefined>>({});
   
+  // NEW: State for multi-org billing selection
+  const [userId, setUserId] = useState<string>("");
+  const [accountType, setAccountType] = useState<string | null>(null);
+  const [linkedOrgs, setLinkedOrgs] = useState<{id: string, name: string}[]>([]);
+  const [selectedClinicId, setSelectedClinicId] = useState<string>("");
+
+  // Fetch user role and linked organizations on mount
+  useEffect(() => {
+    const fetchUserAndOrgs = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      setUserId(user.id);
+      setSelectedClinicId(user.id); // Default to solo/self
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("account_type")
+        .eq("id", user.id)
+        .single();
+        
+      if (profile) setAccountType(profile.account_type);
+
+      // If they are a doctor, fetch all hospitals they belong to
+      if (profile?.account_type === "doctor") {
+        const { data: orgs } = await supabase
+          .from("doctor_orgs")
+          .select("org_id, profiles:org_id(organization_name)")
+          .eq("doctor_id", user.id);
+
+        if (orgs && orgs.length > 0) {
+          const mapped = orgs.map((o: any) => ({
+            id: o.org_id,
+            name: o.profiles?.organization_name || "Unknown Organization"
+          }));
+          setLinkedOrgs(mapped);
+          
+          // Optionally default to their first linked hospital instead of solo
+          // setSelectedClinicId(mapped[0].id); 
+        }
+      }
+    };
+    fetchUserAndOrgs();
+  }, []);
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -85,6 +131,7 @@ export default function ClaimForm() {
   const [providerIdHint, setProviderIdHint] = useState<string>("");
   const [registeredPayerUuid, setRegisteredPayerUuid] = useState<string | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
 
   const handleProviderSelect = (provider: Provider) => {
     setForm((prev) => ({
@@ -245,7 +292,8 @@ export default function ClaimForm() {
         payer_name: form.payer_name,
         payer_id: registeredPayerUuid || form.payer_name, 
         member_id: form.payer_id, 
-        confidence_scores: extractedScores // Optional: Send back to backend to track model performance
+        confidence_scores: extractedScores, // Optional: Send back to backend to track model performance
+        clinic_id: selectedClinicId
       };
 
       const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/claims/scrub`, {
@@ -263,7 +311,8 @@ export default function ClaimForm() {
       }
 
       const data = await res.json();
-      router.push(`/claims/${data.id}/results`);
+      const basePath = pathname.replace('/new', '');
+      router.push(`${basePath}/${data.id}/results`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -292,6 +341,45 @@ export default function ClaimForm() {
         <div className="bg-red-50 text-red-600 text-sm rounded-lg p-4 border border-red-200">
           {error}
         </div>
+      )}
+
+      {/* Billing Organization Dropdown (Only shows if Doctor has joined networks) */}
+      {accountType === "doctor" && linkedOrgs.length > 0 && (
+        <section className="bg-[#f9fafb] p-5 rounded-xl border border-[#e5e7eb] mb-8">
+          <div className="flex items-center gap-2 mb-3">
+            <Building2 className="h-5 w-5 text-[#16a34a]" />
+            <h3 className="font-display text-base font-bold text-[#0a0a0a]">
+              Billing Organization
+            </h3>
+          </div>
+          <div className="max-w-md">
+            <label className="block text-sm font-medium text-[#374151] mb-1.5">
+              Submitting claim on behalf of:
+            </label>
+            <div className="relative">
+              <select
+                value={selectedClinicId}
+                onChange={(e) => setSelectedClinicId(e.target.value)}
+                className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-[#e5e7eb] bg-white text-sm text-[#0a0a0a] focus:outline-none focus:ring-4 focus:ring-[#16a34a]/10 focus:border-[#16a34a] transition-all appearance-none cursor-pointer"
+              >
+                <option value={userId}>Solo Practice (Myself)</option>
+                {linkedOrgs.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+            </div>
+            <p className="text-xs text-[#6b7280] mt-2">
+              If you select a hospital network, this claim will be visible to their administrative staff.
+            </p>
+          </div>
+        </section>
       )}
 
       {/* Document Upload (AI Auto-Fill) */}

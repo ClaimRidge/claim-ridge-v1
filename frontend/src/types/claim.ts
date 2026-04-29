@@ -10,6 +10,8 @@ export interface ClaimFormData {
   procedure_codes: string[];
   billed_amount: number;
   notes: string;
+  confidence_scores?: Record<string, number>;
+  clinic_id?: string;
 }
 
 export interface ScrubResult {
@@ -82,7 +84,7 @@ export interface Claim {
   claim_number?: string;
   patient_name: string;
   patient_id: string;
-  member_id?: string;        // Added to fix the error
+  member_id?: string;
   date_of_service: string;
   provider_name: string;
   provider_id: string;
@@ -117,17 +119,3 @@ export interface InsurerProfile {
   updated_at: string;
 }
 
-export interface ClaimFormData {
-  patient_name: string;
-  patient_id: string;
-  date_of_service: string;
-  provider_name: string;
-  provider_id: string;
-  payer_name: string;
-  payer_id: string;
-  diagnosis_codes: string[];
-  procedure_codes: string[];
-  billed_amount: number;
-  notes: string;
-  confidence_scores?: Record<string, number>;
-}

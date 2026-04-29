@@ -59,8 +59,16 @@ export default function SettingsPage() {
         .maybeSingle();
       
       if (profile) {
+        let fetchedOrgCode = profile.org_code;
+
+        // SELF-HEALING: If provider has no org code, generate and save it now
+        if (profile.account_type === "provider" && !fetchedOrgCode) {
+          fetchedOrgCode = 'ORG-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+          await supabase.from("profiles").update({ org_code: fetchedOrgCode }).eq("id", user.id);
+        }
+
         setAccountType(profile.account_type);
-        setOrgCode(profile.org_code || "");
+        setOrgCode(fetchedOrgCode || "");
         setParentOrgId(profile.parent_org_id || null);
         
         setFormData({
@@ -316,7 +324,7 @@ export default function SettingsPage() {
             />
           </div>
 
-          {false && (
+          {accountType === "provider" && (
             <>
               <div className="lg:col-span-1">
                 <h2 className="font-display font-bold text-lg text-[#0a0a0a]">Organization Code</h2>
@@ -325,15 +333,19 @@ export default function SettingsPage() {
               <div className="lg:col-span-2 bg-white border border-[#e5e7eb] rounded-xl p-6 shadow-sm flex items-center justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-wider text-gray-500 font-bold mb-1">Your Unique Code</p>
-                  <code className="px-3 py-1.5 bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0] rounded-lg text-lg font-bold tracking-widest">
-                    {orgCode || "Generating..."}
-                  </code>
+                  {orgCode ? (
+                    <code className="px-3 py-1.5 bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0] rounded-lg text-lg font-bold tracking-widest animate-in fade-in zoom-in duration-300">
+                      {orgCode}
+                    </code>
+                  ) : (
+                    <div className="h-10 w-24 bg-gray-100 animate-pulse rounded-lg border border-gray-200"></div>
+                  )}
                 </div>
               </div>
             </>
           )}
 
-          {false && (
+          {accountType === "doctor" && (
             <>
               <div className="lg:col-span-1">
                 <h2 className="font-display font-bold text-lg text-[#0a0a0a]">Network Affiliation</h2>
@@ -397,7 +409,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Section 3: Policy Rules (Insurance Only) */}
-          {true && (
+          {false && (
             <>
               <div className="lg:col-span-1">
                 <h2 className="font-display font-bold text-lg text-[#0a0a0a]">Policy Guidelines</h2>
@@ -472,7 +484,7 @@ export default function SettingsPage() {
                   size="sm" 
                   onClick={() => setShowDeletePanel(true)}
                 >
-                  Delete...
+                  Delete
                 </Button>
               </div>
             ) : (

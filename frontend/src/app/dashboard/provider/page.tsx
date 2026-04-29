@@ -215,7 +215,7 @@ export default function DashboardPage() {
             <p className="text-[#9ca3af] text-sm">Track and manage your claims pipeline</p>
           </div>
         </div>
-        <Link href="/claims/new">
+        <Link href="/dashboard/provider/claims/new">
           <Button className="gap-2 w-full sm:w-auto">
             <FilePlus className="h-4 w-4" />
             New Claim
@@ -301,7 +301,7 @@ export default function DashboardPage() {
                 : "No claims match this filter."}
             </p>
             {activeFilter === "all" && (
-              <Link href="/claims/new">
+              <Link href="/dashboard/provider/claims/new">
                 <Button size="sm" className="gap-2">
                   <FilePlus className="h-4 w-4" />
                   Submit First Claim
@@ -347,7 +347,7 @@ export default function DashboardPage() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <Link
-                          href={`/claims/${claim.id}/results`}
+                          href={`/dashboard/provider/claims/${claim.id}/results`}
                           className="inline-flex items-center gap-1 text-sm text-[#16a34a] hover:text-[#15803d] font-semibold"
                         >
                           <Eye className="h-3.5 w-3.5" />

@@ -131,7 +131,7 @@ export default function ClaimsHistoryPage() {
     setToDate("");
   };
 
-  const totalExports = logs.reduce((sum, l) => sum + (l.export_count || 0), 0);
+
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -154,10 +154,7 @@ export default function ClaimsHistoryPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-sm text-[#6b7280]">
-          <Download className="h-4 w-4 text-[#16a34a]" />
-          {totalExports} PDF export{totalExports === 1 ? "" : "s"}
-        </div>
+
       </div>
 
       {/* Filters */}
@@ -249,7 +246,7 @@ export default function ClaimsHistoryPage() {
                 : "Try adjusting or clearing your filters."}
             </p>
             {logs.length === 0 && (
-              <Link href="/claims/new">
+              <Link href="/dashboard/provider/claims/new">
                 <Button size="sm">Submit a claim</Button>
               </Link>
             )}
@@ -267,7 +264,7 @@ export default function ClaimsHistoryPage() {
                   <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Amount</th>
                   <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Flags</th>
                   <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Exports</th>
+
                   <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Scrubbed</th>
                   <th className="px-4 py-3" />
                 </tr>
@@ -282,7 +279,7 @@ export default function ClaimsHistoryPage() {
                       key={log.id}
                       onClick={() => {
                         if (claimId) {
-                          window.location.href = `/claims/${claimId}/results`;
+                          window.location.href = `/dashboard/provider/claims/${claimId}/results`;
                         }
                       }}
                       className={`transition-colors ${
@@ -326,12 +323,7 @@ export default function ClaimsHistoryPage() {
                       <td className="px-4 py-3">
                         <StatusBadge status={derived} />
                       </td>
-                      <td className="px-4 py-3 text-sm text-[#6b7280]">
-                        <span className="inline-flex items-center gap-1">
-                          <Download className="h-3 w-3 text-[#9ca3af]" />
-                          {log.export_count}
-                        </span>
-                      </td>
+
                       <td className="px-4 py-3 text-xs text-[#9ca3af] whitespace-nowrap">
                         {new Date(log.created_at).toLocaleDateString("en-GB", {
                           day: "2-digit",

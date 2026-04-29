@@ -7,7 +7,7 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { Shield, Building2, Stethoscope, ArrowRight, ArrowLeft, ShieldCheck } from "lucide-react";
 
-type Role = "provider" | "insurance" | null;
+type Role = "provider" | "insurance" | "doctor" | null;
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
@@ -36,6 +36,31 @@ export default function OnboardingPage() {
     policyFileBase64: "",
     policyFileName: ""
   });
+
+  // Step 3: Doctor Fields
+  const [doctorDetails, setDoctorDetails] = useState({
+    fullName: "",
+    specialty: "",
+    orgCode: "" // Optional
+  });
+
+  useEffect(() => {
+    // Read URL parameters on mount
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const roleParam = params.get("role");
+      const orgParam = params.get("org");
+
+      if (roleParam === "doctor") {
+        setRole("doctor");
+        setStep(2); // Auto-advance for onboarding
+      }
+      
+      if (orgParam) {
+        setDoctorDetails(prev => ({ ...prev, orgCode: orgParam.toUpperCase() }));
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -79,19 +104,49 @@ export default function OnboardingPage() {
         id: user.id,
         account_type: role,
       };
+      let parent_org_id = null;
 
-      if (role === "provider") {
+      // 1. If Doctor, check if they entered an Org Code
+      if (role === "doctor") {
+        if (doctorDetails.orgCode) {
+          const { data: org, error: orgError } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("org_code", doctorDetails.orgCode.toUpperCase())
+            .single();
+            
+          if (orgError || !org) {
+            setError("Invalid Organization Code. Leave blank to operate as a solo doctor.");
+            setLoading(false);
+            return;
+          }
+          parent_org_id = org.id;
+        }
+
+        profileData = {
+          ...profileData,
+          organization_name: doctorDetails.fullName,
+          parent_org_id: parent_org_id,
+          config_json: { specialty: doctorDetails.specialty }
+        };
+      } 
+      // 2. If Provider (Super Admin), generate an Org Code for them to share
+      else if (role === "provider") {
+        const generatedOrgCode = 'ORG-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        
         profileData = {
           ...profileData,
           organization_name: providerDetails.legalNameEn,
           license_number: providerDetails.licenseNumber,
           contact_email: providerDetails.primaryEmail,
+          org_code: generatedOrgCode, // Save the generated code
           config_json: {
             organization_name_ar: providerDetails.legalNameAr,
             address: providerDetails.address
           }
         };
       } else {
+        // Insurance logic
         profileData = {
           ...profileData,
           organization_name: insuranceDetails.companyNameEn,
@@ -112,6 +167,14 @@ export default function OnboardingPage() {
       if (error) {
         setError(error.message);
         return;
+      }
+
+      // NEW: Insert into doctor_orgs if they joined an org
+      if (role === "doctor" && parent_org_id) {
+        await supabase.from("doctor_orgs").insert({
+          doctor_id: user.id,
+          org_id: parent_org_id
+        });
       }
 
       if (role === "insurance" && insuranceDetails.policyFileBase64) {
@@ -194,6 +257,24 @@ export default function OnboardingPage() {
                   <div>
                     <h3 className={`font-bold ${role === "insurance" ? "text-[#16a34a]" : "text-gray-900"}`}>Insurance Company (Payer)</h3>
                     <p className="text-sm text-gray-500 mt-1">Receive claims and manage adjudication rules.</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRole("doctor")}
+                  className={`flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all ${
+                    role === "doctor"
+                      ? "border-[#16a34a] bg-[#f0fdf4]"
+                      : "border-gray-200 hover:border-[#16a34a]/30 hover:bg-gray-50"
+                  }`}
+                >
+                  <div className={`p-3 rounded-lg ${role === "doctor" ? "bg-[#16a34a] text-white" : "bg-gray-100 text-gray-500"}`}>
+                    <Stethoscope className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h3 className={`font-bold ${role === "doctor" ? "text-[#16a34a]" : "text-gray-900"}`}>Doctor (Individual)</h3>
+                    <p className="text-sm text-gray-500 mt-1">Link with a hospital or operate as a solo practitioner.</p>
                   </div>
                 </button>
               </div>
@@ -287,6 +368,57 @@ export default function OnboardingPage() {
                   )}
                 </div>
               </div>
+              <div className="flex gap-4">
+                <Button type="button" variant="outline" onClick={() => setStep(1)} className="flex-1">Back</Button>
+                <Button type="submit" loading={loading} className="flex-1">Finish Setup</Button>
+              </div>
+            </form>
+          )}
+
+          {step === 2 && role === "doctor" && (
+            <form onSubmit={handleSubmit} className="space-y-8">
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-semibold text-gray-900 border-b pb-2 mb-4">Professional Identity</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input 
+                      id="fullName" 
+                      label="Full Legal Name" 
+                      value={doctorDetails.fullName} 
+                      onChange={e => setDoctorDetails({...doctorDetails, fullName: e.target.value})} 
+                      required 
+                      placeholder="Dr. John Doe"
+                    />
+                    <Input 
+                      id="specialty" 
+                      label="Medical Specialty" 
+                      value={doctorDetails.specialty} 
+                      onChange={e => setDoctorDetails({...doctorDetails, specialty: e.target.value})} 
+                      required 
+                      placeholder="e.g. General Practice, Cardiology"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-[#f9fafb] border border-[#e5e7eb] rounded-2xl p-6">
+                  <h3 className="font-semibold text-gray-900 flex items-center gap-2 mb-2">
+                    <Building2 className="h-4 w-4 text-[#16a34a]" />
+                    Hospital Affiliation (Optional)
+                  </h3>
+                  <p className="text-sm text-[#6b7280] mb-4">
+                    If you operate within a hospital network, enter their organization code below to link your account.
+                  </p>
+                  <Input 
+                    id="orgCode" 
+                    label="Organization Code" 
+                    value={doctorDetails.orgCode} 
+                    onChange={e => setDoctorDetails({...doctorDetails, orgCode: e.target.value.toUpperCase()})} 
+                    placeholder="e.g. ORG-XXXXXX"
+                    className="max-w-xs font-mono tracking-widest"
+                  />
+                </div>
+              </div>
+
               <div className="flex gap-4">
                 <Button type="button" variant="outline" onClick={() => setStep(1)} className="flex-1">Back</Button>
                 <Button type="submit" loading={loading} className="flex-1">Finish Setup</Button>

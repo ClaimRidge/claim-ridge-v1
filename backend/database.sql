@@ -110,6 +110,9 @@ CREATE TABLE public.profiles (
   config_json jsonb DEFAULT '{}'::jsonb,
   policy_file_path text,
   policy_file_name text,
+  org_code text UNIQUE,
+  parent_org_id uuid,
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
-  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
+  CONSTRAINT profiles_parent_org_id_fkey FOREIGN KEY (parent_org_id) REFERENCES auth.users(id)
 );

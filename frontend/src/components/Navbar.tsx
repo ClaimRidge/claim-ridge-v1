@@ -10,6 +10,7 @@ import ClaimRidgeLogo from "@/components/ClaimRidgeLogo";
 
 export default function Navbar() {
   const [user, setUser] = useState<User | null>(null);
+  const [accountType, setAccountType] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
@@ -20,6 +21,16 @@ export default function Navbar() {
     const fetchUser = async () => {
       const { data } = await supabase.auth.getUser();
       setUser(data.user);
+      
+      if (data.user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("account_type")
+          .eq("id", data.user.id)
+          .maybeSingle();
+        if (profile) setAccountType(profile.account_type);
+      }
+      
       setLoading(false);
     };
     fetchUser();
@@ -31,12 +42,13 @@ export default function Navbar() {
     return () => subscription.unsubscribe();
   }, [supabase]);
 
-  // Show Navbar on home, dashboards, claims, and settings
+  // Show Navbar on home and doctor dashboard (exclude redirector)
   const showNavbar = 
     pathname === "/" || 
-    pathname.startsWith("/dashboard") || 
-    pathname.startsWith("/claims") || 
-    pathname.startsWith("/settings");
+    (pathname.startsWith("/dashboard") && 
+     pathname !== "/dashboard" &&
+     !pathname.startsWith("/dashboard/insurance") && 
+     !pathname.startsWith("/dashboard/provider"));
 
   if (!showNavbar) {
     return null;
@@ -72,31 +84,37 @@ export default function Navbar() {
                   <LayoutDashboard className="h-4 w-4" />
                   Overview
                 </Link>
-                <Link
-                  href="/dashboard/pipeline"
-                  className={`flex items-center gap-1.5 text-sm transition-colors ${
-                    pathname.startsWith("/dashboard/pipeline") 
-                      ? "text-[#16a34a] font-semibold" 
-                      : "text-[#374151] hover:text-[#16a34a]"
-                  }`}
-                >
-                  <Columns3 className="h-4 w-4" />
-                  Pipeline
-                </Link>
-                <Link
-                  href="/claims/new"
-                  className="flex items-center gap-1.5 text-sm text-[#374151] hover:text-[#16a34a] transition-colors"
-                >
-                  <FilePlus className="h-4 w-4" />
-                  New Claim
-                </Link>
-                <Link
-                  href="/settings"
-                  className="flex items-center gap-1.5 text-sm text-[#374151] hover:text-[#16a34a] transition-colors"
-                >
-                  <Settings className="h-4 w-4" />
-                  Settings
-                </Link>
+                {accountType && (
+                  <Link
+                    href={`/dashboard/${accountType}/pipeline`}
+                    className={`flex items-center gap-1.5 text-sm transition-colors ${
+                      pathname.startsWith(`/dashboard/${accountType}/pipeline`) 
+                        ? "text-[#16a34a] font-semibold" 
+                        : "text-[#374151] hover:text-[#16a34a]"
+                    }`}
+                  >
+                    <Columns3 className="h-4 w-4" />
+                    Pipeline
+                  </Link>
+                )}
+                {accountType && (
+                  <Link
+                    href={`/dashboard/${accountType}/claims/new`}
+                    className="flex items-center gap-1.5 text-sm text-[#374151] hover:text-[#16a34a] transition-colors"
+                  >
+                    <FilePlus className="h-4 w-4" />
+                    New Claim
+                  </Link>
+                )}
+                {accountType && (
+                  <Link
+                    href={`/dashboard/${accountType}/settings`}
+                    className="flex items-center gap-1.5 text-sm text-[#374151] hover:text-[#16a34a] transition-colors"
+                  >
+                    <Settings className="h-4 w-4" />
+                    Settings
+                  </Link>
+                )}
                 <div className="flex items-center gap-3 ml-2 pl-4 border-l border-[#e5e7eb]">
                   <span className="text-sm text-[#6b7280]">{user.email}</span>
                   <button
@@ -155,34 +173,40 @@ export default function Navbar() {
                 <LayoutDashboard className="h-4 w-4" />
                 Overview
               </Link>
-              <Link
-                href="/dashboard/pipeline"
-                className={`flex items-center gap-2 py-2 transition-colors ${
-                  pathname.startsWith("/dashboard/pipeline") 
-                    ? "text-[#16a34a] font-semibold" 
-                    : "text-[#374151] hover:text-[#16a34a]"
-                }`}
-                onClick={() => setMobileOpen(false)}
-              >
-                <Columns3 className="h-4 w-4" />
-                Pipeline
-              </Link>
-              <Link
-                href="/claims/new"
-                className="flex items-center gap-2 py-2 text-[#374151] hover:text-[#16a34a]"
-                onClick={() => setMobileOpen(false)}
-              >
-                <FilePlus className="h-4 w-4" />
-                New Claim
-              </Link>
-              <Link
-                href="/settings"
-                className="flex items-center gap-2 py-2 text-[#374151] hover:text-[#16a34a]"
-                onClick={() => setMobileOpen(false)}
-              >
-                <Settings className="h-4 w-4" />
-                Settings
-              </Link>
+              {accountType && (
+                <Link
+                  href={`/dashboard/${accountType}/pipeline`}
+                  className={`flex items-center gap-2 py-2 transition-colors ${
+                    pathname.startsWith(`/dashboard/${accountType}/pipeline`) 
+                      ? "text-[#16a34a] font-semibold" 
+                      : "text-[#374151] hover:text-[#16a34a]"
+                  }`}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <Columns3 className="h-4 w-4" />
+                  Pipeline
+                </Link>
+              )}
+              {accountType && (
+                <Link
+                  href={`/dashboard/${accountType}/claims/new`}
+                  className="flex items-center gap-2 py-2 text-[#374151] hover:text-[#16a34a]"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <FilePlus className="h-4 w-4" />
+                  New Claim
+                </Link>
+              )}
+              {accountType && (
+                <Link
+                  href={`/dashboard/${accountType}/settings`}
+                  className="flex items-center gap-2 py-2 text-[#374151] hover:text-[#16a34a]"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <Settings className="h-4 w-4" />
+                  Settings
+                </Link>
+              )}
               <button
                 onClick={handleSignOut}
                 className="flex items-center gap-2 py-2 text-[#374151] hover:text-[#16a34a] w-full"

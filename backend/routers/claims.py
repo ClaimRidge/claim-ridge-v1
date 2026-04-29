@@ -33,8 +33,8 @@ class ClaimFormData(BaseModel):
     procedure_codes: List[str]
     billed_amount: float
     notes: Optional[str] = ""
-    # NEW: Accept confidence scores from frontend to track AI performance
     confidence_scores: Optional[Dict[str, Any]] = {}
+    clinic_id: Optional[str] = None
 
 # --- Router ---
 router = APIRouter(prefix="/api/claims", tags=["claims"])
@@ -87,16 +87,31 @@ async def scrub_claim_endpoint(claim_data: ClaimFormData, current_user = Depends
         except Exception as e:
             logger.warning(f"Registered payer lookup failed: {e}")
 
-    resolved_provider_id = current_user.id
+    # 2. Resolve Clinic/Provider Entity
+    resolved_clinic_id = current_user.id # Default to self (if Provider or Solo Doctor)
+    
+    # If the frontend explicitly provided a clinic_id, verify they have access to it
+    if claim_data.clinic_id and claim_data.clinic_id != current_user.id:
+        try:
+            # Check if this doctor is linked to this org in the doctor_orgs junction table
+            org_check = supabase.table("doctor_orgs").select("org_id").eq("doctor_id", current_user.id).eq("org_id", claim_data.clinic_id).execute()
+            if org_check.data:
+                resolved_clinic_id = claim_data.clinic_id
+            else:
+                logger.warning(f"User {current_user.id} tried to submit for org {claim_data.clinic_id} without an active link.")
+        except Exception as e:
+            logger.error(f"Error verifying doctor_orgs: {e}")
+
+    resolved_provider_id = resolved_clinic_id
 
     # 2. Build the Payload
     claim_payload = {
         "id": str(uuid.uuid4()), 
         "claim_number": claim_number,
         "status": "pending",
-        "user_id": user_id,
-        "clinic_id": user_id,       
-        "provider_id": resolved_provider_id, 
+        "user_id": user_id,                 # ALWAYS the Doctor who submitted
+        "clinic_id": resolved_clinic_id,    # The Hospital (or the Solo Doctor)
+        "provider_id": resolved_provider_id, # Standardized provider billing ID
         "payer_id": resolved_payer_id,       
         "patient_name": claim_data.patient_name,
         "patient_id": claim_data.patient_id,

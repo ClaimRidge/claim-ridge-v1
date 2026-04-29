@@ -26,6 +26,11 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
 
   const [accountType, setAccountType] = useState<string | null>(null);
+  const [orgCode, setOrgCode] = useState<string>("");
+  const [parentOrgId, setParentOrgId] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [showDeletePanel, setShowDeletePanel] = useState(false);
   const [formData, setFormData] = useState({
     organizationName: "",
     organizationNameAr: "",
@@ -55,6 +60,9 @@ export default function SettingsPage() {
       
       if (profile) {
         setAccountType(profile.account_type);
+        setOrgCode(profile.org_code || "");
+        setParentOrgId(profile.parent_org_id || null);
+        
         setFormData({
           organizationName: profile.organization_name || "",
           organizationNameAr: profile.config_json?.organization_name_ar || "",
@@ -132,6 +140,103 @@ export default function SettingsPage() {
     } catch (err: any) {
       setError(err.message || "Failed to update profile");
     } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleJoinOrg = async () => {
+    if (!user || !joinCode.trim()) return;
+    setSaving(true);
+    setError("");
+
+    try {
+      // Find the org by code
+      const { data: org } = await supabase
+        .from("profiles")
+        .select("id, organization_name")
+        .eq("org_code", joinCode.trim().toUpperCase())
+        .maybeSingle();
+
+      if (!org) {
+        setError("Invalid Organization Code.");
+        setSaving(false);
+        return;
+      }
+
+      // Update doctor's profile
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({ parent_org_id: org.id })
+        .eq("id", user.id);
+
+      if (updateError) throw updateError;
+
+      // NEW: Also insert into doctor_orgs for many-to-many relationship
+      await supabase.from("doctor_orgs").insert({
+        doctor_id: user.id,
+        org_id: org.id
+      });
+
+      setParentOrgId(org.id);
+      setJoinCode("");
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err: any) {
+      setError(err.message || "Failed to join organization");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLeaveOrg = async () => {
+    if (!user) return;
+    setSaving(true);
+    setError("");
+
+    try {
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({ parent_org_id: null })
+        .eq("id", user.id);
+
+      if (updateError) throw updateError;
+
+      setParentOrgId(null);
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err: any) {
+      setError(err.message || "Failed to leave organization");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmation !== "delete") return;
+    
+    setSaving(true);
+    setError("");
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/user/account`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${session?.access_token}`
+        }
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || "Failed to delete account");
+      }
+      
+      // Sign out on the frontend and redirect
+      await supabase.auth.signOut();
+      window.location.href = "/login";
+    } catch (err: any) {
+      setError(err.message);
       setSaving(false);
     }
   };
@@ -217,6 +322,63 @@ export default function SettingsPage() {
             />
           </div>
 
+          {false && (
+            <>
+              <div className="lg:col-span-1">
+                <h2 className="font-display font-bold text-lg text-[#0a0a0a]">Organization Code</h2>
+                <p className="text-sm text-[#6b7280] mt-1">Share this code with doctors to add them to your hospital network.</p>
+              </div>
+              <div className="lg:col-span-2 bg-white border border-[#e5e7eb] rounded-xl p-6 shadow-sm flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-gray-500 font-bold mb-1">Your Unique Code</p>
+                  <code className="px-3 py-1.5 bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0] rounded-lg text-lg font-bold tracking-widest">
+                    {orgCode || "Generating..."}
+                  </code>
+                </div>
+              </div>
+            </>
+          )}
+
+          {true && (
+            <>
+              <div className="lg:col-span-1">
+                <h2 className="font-display font-bold text-lg text-[#0a0a0a]">Network Affiliation</h2>
+                <p className="text-sm text-[#6b7280] mt-1">Manage your hospital or clinic association.</p>
+              </div>
+              <div className="lg:col-span-2 bg-white border border-[#e5e7eb] rounded-xl p-6 shadow-sm">
+                {parentOrgId ? (
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <CheckCircle2 className="h-5 w-5 text-[#16a34a]" />
+                      <p className="text-sm text-[#0a0a0a] font-medium">You are linked to a healthcare organization.</p>
+                    </div>
+                    <p className="text-sm text-[#6b7280] mb-4">Claims you submit will be accessible to your organization's administrators.</p>
+                    <Button type="button" variant="danger" onClick={handleLeaveOrg} disabled={saving}>
+                      Leave Organization
+                    </Button>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-sm text-[#6b7280] mb-4">You are currently operating as a solo practitioner. Enter a code to join a network.</p>
+                    <div className="flex items-end gap-3 max-w-md">
+                      <div className="flex-1">
+                        <Input
+                          label="Organization Code"
+                          placeholder="e.g., ORG-XXXXXX"
+                          value={joinCode}
+                          onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                        />
+                      </div>
+                      <Button type="button" onClick={handleJoinOrg} disabled={saving || !joinCode}>
+                        Join
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
           {/* Section 2: Contact Info */}
           <div className="lg:col-span-1">
             <h2 className="font-display font-bold text-lg text-[#0a0a0a]">Contact Details</h2>
@@ -241,7 +403,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Section 3: Policy Rules (Insurance Only) */}
-          {accountType === "insurance" && (
+          {false && (
             <>
               <div className="lg:col-span-1">
                 <h2 className="font-display font-bold text-lg text-[#0a0a0a]">Policy Guidelines</h2>
@@ -296,6 +458,67 @@ export default function SettingsPage() {
               </span>
             </div>
             <p className="mt-4 text-xs text-[#9ca3af] italic">Contact support to change your primary login email address.</p>
+          </div>
+
+          {/* Danger Zone: Delete Account */}
+          <div className="lg:col-span-1 mt-12 pt-12 border-t border-gray-100">
+            <h2 className="font-display font-bold text-lg text-red-600">Danger Zone</h2>
+            <p className="text-sm text-[#6b7280] mt-1">Irreversible account actions.</p>
+          </div>
+          <div className="lg:col-span-2 mt-12 pt-12 border-t border-gray-100 bg-red-50/30 border-red-100 rounded-xl p-6 mb-8">
+            {!showDeletePanel ? (
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-red-700">Delete your account</h3>
+                  <p className="text-xs text-red-600/70 mt-1">This will permanently remove all your data, claims, and organization settings.</p>
+                </div>
+                <Button 
+                  type="button" 
+                  variant="danger" 
+                  size="sm" 
+                  onClick={() => setShowDeletePanel(true)}
+                >
+                  Delete...
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                <div className="bg-white p-4 rounded-lg border border-red-200">
+                  <p className="text-sm text-gray-900 font-medium mb-3">
+                    Are you absolutely sure? Type <span className="font-bold text-red-600">delete</span> below to confirm.
+                  </p>
+                  <Input 
+                    placeholder="Type 'delete' to confirm" 
+                    value={deleteConfirmation} 
+                    onChange={(e) => setDeleteConfirmation(e.target.value.toLowerCase())}
+                    className="border-red-200 focus:border-red-500 focus:ring-red-500"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    className="flex-1"
+                    onClick={() => {
+                      setShowDeletePanel(false);
+                      setDeleteConfirmation("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    type="button" 
+                    variant="danger" 
+                    className="flex-1"
+                    disabled={deleteConfirmation !== "delete" || saving}
+                    loading={saving}
+                    onClick={handleDeleteAccount}
+                  >
+                    Permanently Delete
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

@@ -34,13 +34,17 @@ export default function LoginPage() {
 
       // Check which profile the user has for role-based redirect
       if (data.user) {
-        const { data: insurerProfile } = await supabase
-          .from("insurer_profiles")
-          .select("id")
-          .eq("user_id", data.user.id)
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("account_type")
+          .eq("id", data.user.id)
           .maybeSingle();
 
-        router.push(insurerProfile ? "/insurer/dashboard" : "/dashboard");
+        if (profile?.account_type === "insurance") {
+          router.push("/dashboard/insurance");
+        } else {
+          router.push("/dashboard");
+        }
       } else {
         router.push("/dashboard");
       }

@@ -236,7 +236,7 @@ function Footer() {
             <ul className="space-y-3 text-sm text-[#6b7280]">
               <li><Link href="/signup" className="hover:text-[#16a34a] transition-colors">For Providers</Link></li>
               <li><Link href="/signup" className="hover:text-[#16a34a] transition-colors">For Insurance</Link></li>
-              <li><Link href="/claims/new" className="hover:text-[#16a34a] transition-colors">AI Scrubber</Link></li>
+              <li><Link href="/dashboard" className="hover:text-[#16a34a] transition-colors">AI Scrubber</Link></li>
             </ul>
           </div>
           <div>

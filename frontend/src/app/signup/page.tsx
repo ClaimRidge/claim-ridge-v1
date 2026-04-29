@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { Shield, Building2, Stethoscope, ArrowRight, ArrowLeft, ShieldCheck } from "lucide-react";
+import ClaimRidgeLogo from "@/components/ClaimRidgeLogo";
 
-type Role = "provider" | "insurance" | null;
+type Role = "provider" | "insurance" | "doctor" | null;
 
 export default function SignupPage() {
   const [step, setStep] = useState(1);
@@ -36,6 +37,30 @@ export default function SignupPage() {
     policyFileBase64: "",
     policyFileName: ""
   });
+
+  // Step 3: Doctor Fields
+  const [doctorDetails, setDoctorDetails] = useState({
+    fullName: "",
+    specialty: "",
+    orgCode: "" // Optional
+  });
+
+  useEffect(() => {
+    // Read URL parameters on mount
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const roleParam = params.get("role");
+      const orgParam = params.get("org");
+
+      if (roleParam === "doctor") {
+        setRole("doctor");
+      }
+      
+      if (orgParam) {
+        setDoctorDetails(prev => ({ ...prev, orgCode: orgParam.toUpperCase() }));
+      }
+    }
+  }, []);
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -72,22 +97,54 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      let metadata = {};
-      
-      if (role === "provider") {
+      let metadata: any = {
+        account_type: role,
+      };
+      let parent_org_id = null;
+
+      // 1. If Doctor, check if they entered an Org Code
+      if (role === "doctor") {
+        if (doctorDetails.orgCode) {
+          const { data: org, error: orgError } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("org_code", doctorDetails.orgCode.toUpperCase())
+            .single();
+            
+          if (orgError || !org) {
+            setError("Invalid Organization Code. Leave blank to operate as a solo doctor.");
+            setLoading(false);
+            return;
+          }
+          parent_org_id = org.id;
+        }
+
         metadata = {
-          account_type: "provider",
+          ...metadata,
+          organization_name: doctorDetails.fullName,
+          parent_org_id: parent_org_id,
+          config_json: { specialty: doctorDetails.specialty }
+        };
+      } 
+      // 2. If Provider (Super Admin), generate an Org Code for them to share
+      else if (role === "provider") {
+        const generatedOrgCode = 'ORG-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        
+        metadata = {
+          ...metadata,
           organization_name: providerDetails.legalNameEn,
           license_number: providerDetails.licenseNumber,
           contact_email: providerDetails.primaryEmail,
+          org_code: generatedOrgCode, // Save the generated code
           config_json: {
             organization_name_ar: providerDetails.legalNameAr,
             address: providerDetails.address
           }
         };
       } else {
+        // Insurance logic
         metadata = {
-          account_type: "insurance",
+          ...metadata,
           organization_name: insuranceDetails.companyNameEn,
           license_number: insuranceDetails.licenseNumber,
           config_json: {
@@ -112,6 +169,14 @@ export default function SignupPage() {
         return;
       }
 
+      // NEW: Insert into doctor_orgs if they joined an org
+      if (role === "doctor" && parent_org_id && data.user) {
+        await supabase.from("doctor_orgs").insert({
+          doctor_id: data.user.id,
+          org_id: parent_org_id
+        });
+      }
+
       // In dev mode with email confirmation disabled, we can redirect immediately
       router.push("/dashboard");
       router.refresh();
@@ -125,26 +190,28 @@ export default function SignupPage() {
   // The success screen is removed for now as requested
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center px-4 py-12 bg-[#f9fafb]">
-      {step > 1 && (
-        <button 
-          onClick={() => setStep(step - 1)}
-          className="mb-6 flex items-center text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors self-start max-w-2xl mx-auto w-full"
-        >
-          <ArrowLeft className="h-4 w-4 mr-1" /> Back
-        </button>
-      )}
+    <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center px-4 py-8 bg-[#f9fafb]">
+      <button 
+        onClick={() => {
+          if (step > 1) setStep(step - 1);
+          else router.push("/");
+        }}
+        className="mb-6 flex items-center text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors self-start max-w-2xl mx-auto w-full"
+      >
+        <ArrowLeft className="h-4 w-4 mr-1" /> {step === 1 ? "Back to Home" : "Back"}
+      </button>
 
       <div className={`w-full ${step === 3 ? "max-w-2xl" : "max-w-md"}`}>
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 bg-[#f0fdf4] border border-[#bbf7d0] rounded-xl mb-4">
-            <Shield className="h-6 w-6 text-[#16a34a]" />
+        <div className="text-center mb-4">
+          <div className="flex justify-center mb-4">
+            <ClaimRidgeLogo size={36} />
           </div>
           <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-[#0a0a0a]">
             {step === 1 && "Create your account"}
             {step === 2 && "Choose account type"}
             {step === 3 && role === "provider" && "Provider Details"}
             {step === 3 && role === "insurance" && "Insurance Details"}
+            {step === 3 && role === "doctor" && "Professional Details"}
           </h1>
           <p className="text-[#6b7280] mt-1">
             {step === 1 && "Join ClaimRidge to streamline your claims"}
@@ -153,7 +220,7 @@ export default function SignupPage() {
           </p>
         </div>
 
-        <div className="bg-white border border-[#e5e7eb] rounded-xl shadow-sm p-5 sm:p-8">
+        <div className="bg-white border border-[#e5e7eb] rounded-xl shadow-sm p-5 sm:p-6">
           {error && (
             <div className="bg-red-50 text-red-600 text-sm rounded-lg p-3 border border-red-200 mb-6">
               {error}
@@ -234,6 +301,24 @@ export default function SignupPage() {
                   <div>
                     <h3 className={`font-bold ${role === "insurance" ? "text-[#16a34a]" : "text-gray-900"}`}>Insurance Company (Payer)</h3>
                     <p className="text-sm text-gray-500 mt-1">I want to receive claims, set adjudication rules, and automate reviews.</p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRole("doctor")}
+                  className={`flex items-start gap-4 p-4 rounded-xl border-2 text-left transition-all ${
+                    role === "doctor"
+                      ? "border-[#16a34a] bg-[#f0fdf4]"
+                      : "border-gray-200 hover:border-[#16a34a]/30 hover:bg-gray-50"
+                  }`}
+                >
+                  <div className={`p-3 rounded-lg ${role === "doctor" ? "bg-[#16a34a] text-white" : "bg-gray-100 text-gray-500"}`}>
+                    <Stethoscope className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h3 className={`font-bold ${role === "doctor" ? "text-[#16a34a]" : "text-gray-900"}`}>Doctor (Individual)</h3>
+                    <p className="text-sm text-gray-500 mt-1">I want to submit claims, link with a hospital, or operate solo.</p>
                   </div>
                 </button>
               </div>
@@ -325,6 +410,53 @@ export default function SignupPage() {
                       {insuranceDetails.policyFileName} ready for upload
                     </p>
                   )}
+                </div>
+              </div>
+              <Button type="submit" loading={loading} className="w-full" size="lg">
+                {loading ? "Creating account..." : "Complete Sign Up"}
+              </Button>
+            </form>
+          )}
+
+          {/* STEP 3: DOCTOR DETAILS */}
+          {step === 3 && role === "doctor" && (
+            <form onSubmit={handleSignup} className="space-y-8">
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input 
+                    id="fullName" 
+                    label="Full Legal Name" 
+                    value={doctorDetails.fullName} 
+                    onChange={e => setDoctorDetails({...doctorDetails, fullName: e.target.value})} 
+                    required 
+                    placeholder="Dr. John Doe"
+                  />
+                  <Input 
+                    id="specialty" 
+                    label="Medical Specialty" 
+                    value={doctorDetails.specialty} 
+                    onChange={e => setDoctorDetails({...doctorDetails, specialty: e.target.value})} 
+                    required 
+                    placeholder="e.g. General Practice"
+                  />
+                </div>
+
+                <div className="bg-[#f9fafb] border border-[#e5e7eb] rounded-2xl p-6">
+                  <h3 className="font-semibold text-gray-900 flex items-center gap-2 mb-2">
+                    <Building2 className="h-4 w-4 text-[#16a34a]" />
+                    Hospital Affiliation (Optional)
+                  </h3>
+                  <p className="text-sm text-[#6b7280] mb-4">
+                    Link your account with a hospital network.
+                  </p>
+                  <Input 
+                    id="orgCode" 
+                    label="Organization Code" 
+                    value={doctorDetails.orgCode} 
+                    onChange={e => setDoctorDetails({...doctorDetails, orgCode: e.target.value.toUpperCase()})} 
+                    placeholder="ORG-XXXXXX"
+                    className="max-w-xs font-mono tracking-widest"
+                  />
                 </div>
               </div>
               <Button type="submit" loading={loading} className="w-full" size="lg">

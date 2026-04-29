@@ -43,8 +43,8 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isInsurerRoute = path.startsWith("/insurer");
-  const isClinicRoute = path.startsWith("/dashboard") || path.startsWith("/claims");
+  const isInsurerRoute = path.startsWith("/dashboard/insurance");
+  const isClinicRoute = (path.startsWith("/dashboard") && !isInsurerRoute) || path.startsWith("/claims");
   const isAuthPage = path === "/login" || path === "/signup";
 
   // Protected routes — redirect to login if not authenticated
@@ -55,19 +55,22 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (user) {
-    // Helper: check if user is an insurer
-    const { data: insurerProfile } = await supabase
-      .from("insurer_profiles")
-      .select("id")
-      .eq("user_id", user.id)
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("account_type")
+      .eq("id", user.id)
       .maybeSingle();
 
-    const isInsurer = !!insurerProfile;
+    const isInsurer = profile?.account_type === "insurance";
+    const isProvider = profile?.account_type === "provider";
+    const isDoctor = profile?.account_type === "doctor";
 
     // Redirect authenticated users away from auth pages to their dashboard
     if (isAuthPage) {
       const url = request.nextUrl.clone();
-      url.pathname = isInsurer ? "/insurer/dashboard" : "/dashboard";
+      if (isInsurer) url.pathname = "/dashboard/insurance";
+      else if (isDoctor) url.pathname = "/dashboard/doctor";
+      else url.pathname = "/dashboard/provider";
       return NextResponse.redirect(url);
     }
 
@@ -81,7 +84,7 @@ export async function updateSession(request: NextRequest) {
     // Prevent insurer users from accessing clinic routes
     if (isClinicRoute && isInsurer) {
       const url = request.nextUrl.clone();
-      url.pathname = "/insurer/dashboard";
+      url.pathname = "/dashboard/insurance";
       return NextResponse.redirect(url);
     }
   }
