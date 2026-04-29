@@ -102,7 +102,6 @@ export default function SignupPage() {
       };
       let parent_org_id = null;
 
-      // 1. If Doctor, check if they entered an Org Code
       if (role === "doctor") {
         if (doctorDetails.orgCode) {
           const { data: org, error: orgError } = await supabase
@@ -126,7 +125,6 @@ export default function SignupPage() {
           config_json: { specialty: doctorDetails.specialty }
         };
       } 
-      // 2. If Provider (Super Admin), generate an Org Code for them to share
       else if (role === "provider") {
         const generatedOrgCode = 'ORG-' + Math.random().toString(36).substring(2, 8).toUpperCase();
         
@@ -135,21 +133,22 @@ export default function SignupPage() {
           organization_name: providerDetails.legalNameEn,
           license_number: providerDetails.licenseNumber,
           contact_email: providerDetails.primaryEmail,
-          org_code: generatedOrgCode, // Save the generated code
+          org_code: generatedOrgCode,
           config_json: {
             organization_name_ar: providerDetails.legalNameAr,
             address: providerDetails.address
           }
         };
       } else {
-        // Insurance logic
+        // INSURANCE LOGIC FIX:
+        // We DO NOT put the base64 PDF into the metadata here, 
+        // otherwise it bloats the JWT cookie and crashes the server.
         metadata = {
           ...metadata,
           organization_name: insuranceDetails.companyNameEn,
           license_number: insuranceDetails.licenseNumber,
           config_json: {
             organization_name_ar: insuranceDetails.companyNameAr,
-            policy_file_base64: insuranceDetails.policyFileBase64,
             policy_file_name: insuranceDetails.policyFileName
           }
         };
@@ -177,7 +176,30 @@ export default function SignupPage() {
         });
       }
 
-      // In dev mode with email confirmation disabled, we can redirect immediately
+      // NEW: Safely update the profile with the Base64 PDF *after* auth creation
+      // This bypasses the cookie and writes directly to the database.
+      if (data.user && role === "insurance" && insuranceDetails.policyFileBase64) {
+        // Wait 1 second to ensure the Supabase auth trigger created the profile row
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const updatedConfig = {
+          ...metadata.config_json,
+          policy_file_base64: insuranceDetails.policyFileBase64
+        };
+
+        await supabase
+          .from("profiles")
+          .update({ config_json: updatedConfig })
+          .eq("id", data.user.id);
+
+        // Trigger backend to chunk and embed the PDF
+        const { data: { session } } = await supabase.auth.getSession();
+        fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/insurer/process-policy`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${session?.access_token}` }
+        }).catch(err => console.error("Policy processing trigger failed:", err));
+      }
+
       router.push("/dashboard");
       router.refresh();
     } catch {

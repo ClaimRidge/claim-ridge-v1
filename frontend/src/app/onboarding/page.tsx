@@ -178,8 +178,10 @@ export default function OnboardingPage() {
       }
 
       if (role === "insurance" && insuranceDetails.policyFileBase64) {
-        const { data: { session } } = await supabase.auth.getSession();
+        // Wait 1 second to ensure the Supabase record is fully committed
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
+        const { data: { session } } = await supabase.auth.getSession();
         fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/insurer/process-policy`, {
           method: "POST",
           headers: { 

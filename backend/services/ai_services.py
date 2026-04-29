@@ -1,4 +1,5 @@
 import json
+import asyncio
 import logging
 import re
 import base64
@@ -6,7 +7,8 @@ import pypdfium2 as pdfium
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from langchain_groq import ChatGroq
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
 from core.config import Config
@@ -132,9 +134,8 @@ def get_llm(model_name: str = Config.LLM_MODEL):
 
 def get_embeddings():
     """Initializes Google's fast text embedding model."""
-    return GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001", 
-        google_api_key=Config.GEMINI_API_KEY
+    return HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-mpnet-base-v2"
     )
 
 def extract_json_from_text(text: str) -> str:
@@ -151,6 +152,7 @@ async def process_and_embed_policy_pdf(insurer_id: str, base64_pdf: str):
     
     # 1. Decode and read PDF
     pdf_bytes = base64.b64decode(base64_pdf)
+    logger.info(f"PDF decoded: {len(pdf_bytes)} bytes.")
     pdf = pdfium.PdfDocument(pdf_bytes)
     
     full_text = ""
@@ -159,9 +161,10 @@ async def process_and_embed_policy_pdf(insurer_id: str, base64_pdf: str):
         full_text += text_page.get_text_range() + "\n\n"
         
     if not full_text.strip():
+        logger.warning(f"Insurer {insurer_id} uploaded a PDF with no readable text.")
         raise ValueError("The uploaded PDF contains no readable text. If it is a scanned image, please upload a text-searchable PDF.")
 
-    logger.info(f"Extracted {len(full_text)} characters from PDF.")
+    logger.info(f"Successfully extracted {len(full_text)} characters from policy PDF for insurer {insurer_id}.")
 
     # 2. Safely chunk the text using LangChain
     text_splitter = RecursiveCharacterTextSplitter(
@@ -177,13 +180,21 @@ async def process_and_embed_policy_pdf(insurer_id: str, base64_pdf: str):
     # 3. Clear old policy chunks for this insurer
     supabase.table("policy_chunks").delete().eq("insurer_id", insurer_id).execute()
     
-    # 4. Embed and insert in safe batches (Avoids Google Rate Limits & Supabase Payload limits)
-    batch_size = 20 
+    # 4. Embed and insert in safe batches
+    batch_size = 50 
     for i in range(0, len(chunks), batch_size):
         batch_chunks = chunks[i:i+batch_size]
         
         # Get embeddings for the batch
-        vectors = embeddings_model.embed_documents(batch_chunks)
+        try:
+            vectors = embeddings_model.embed_documents(batch_chunks)
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                logger.warning("Rate limit hit during embedding. Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+                vectors = embeddings_model.embed_documents(batch_chunks)
+            else:
+                raise e
         
         payload = []
         for chunk, vector in zip(batch_chunks, vectors):
@@ -200,7 +211,22 @@ async def process_and_embed_policy_pdf(insurer_id: str, base64_pdf: str):
         else:
             logger.info(f"Inserted batch {i//batch_size + 1} into database.")
         
-    logger.info(f"Successfully embedded all {len(chunks)} policy chunks for insurer {insurer_id}")
+        # Small delay to respect Google's Free Tier Rate Limits (100 RPM)
+        await asyncio.sleep(1)
+        
+    logger.info(f"Finished processing policy for insurer {insurer_id}. Total {len(chunks)} chunks saved to database.")
+    
+    # 5. Clean up the profile to save space (PDF is now in policy_chunks)
+    try:
+        profile_res = supabase.table("profiles").select("config_json").eq("id", insurer_id).execute()
+        if profile_res.data:
+            config = profile_res.data[0].get("config_json", {})
+            if "policy_file_base64" in config:
+                del config["policy_file_base64"]
+                supabase.table("profiles").update({"config_json": config}).eq("id", insurer_id).execute()
+                logger.info(f"Cleaned up raw PDF base64 from insurer {insurer_id} profile.")
+    except Exception as e:
+        logger.warning(f"Failed to clean up profile after policy processing: {e}")
 
 async def extract_claim_from_document(file_base64: str, media_type: str) -> dict:
     """Single-step extraction: Passes image directly to Gemini, getting strict JSON back instantly."""
@@ -252,7 +278,10 @@ async def scrub_claim(claim_data: dict, registered_payer_id: str = None) -> dict
             
             if res.data and len(res.data) > 0:
                 retrieved_chunks = [match["content"] for match in res.data]
+                logger.info(f"Retrieved {len(retrieved_chunks)} policy rules from vector store for payer {registered_payer_id}.")
                 policy_context = "\n---\n".join(retrieved_chunks)
+            else:
+                logger.info(f"No matching policy rules found for payer {registered_payer_id} with current claim codes.")
         except Exception as e:
             logger.error(f"RAG retrieval failed: {e}")
     else:

@@ -9,3 +9,5 @@ langchain-google-genai
 langchain-groq
 langchain-text-splitters
 pypdfium2
+sentence-transformers
+langchain-huggingface

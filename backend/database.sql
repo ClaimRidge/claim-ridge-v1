@@ -90,6 +90,14 @@ CREATE TABLE public.claims_audit (
   CONSTRAINT claims_audit_pkey PRIMARY KEY (id),
   CONSTRAINT claims_audit_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
+CREATE TABLE public.doctor_orgs (
+  doctor_id uuid NOT NULL,
+  org_id uuid NOT NULL,
+  joined_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT doctor_orgs_pkey PRIMARY KEY (doctor_id, org_id),
+  CONSTRAINT doctor_orgs_doctor_id_fkey FOREIGN KEY (doctor_id) REFERENCES auth.users(id),
+  CONSTRAINT doctor_orgs_org_id_fkey FOREIGN KEY (org_id) REFERENCES auth.users(id)
+);
 CREATE TABLE public.policy_chunks (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   insurer_id uuid,
