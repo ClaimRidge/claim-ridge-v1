@@ -1,14 +1,14 @@
-import json
 import asyncio
+import json
 import logging
 import re
 import base64
+import time
 import pypdfium2 as pdfium
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from langchain_groq import ChatGroq
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
 from core.config import Config
@@ -134,8 +134,9 @@ def get_llm(model_name: str = Config.LLM_MODEL):
 
 def get_embeddings():
     """Initializes Google's fast text embedding model."""
-    return HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-mpnet-base-v2"
+    return GoogleGenerativeAIEmbeddings(
+        model="models/gemini-embedding-001", 
+        google_api_key=Config.GEMINI_API_KEY
     )
 
 def extract_json_from_text(text: str) -> str:
@@ -166,10 +167,10 @@ async def process_and_embed_policy_pdf(insurer_id: str, base64_pdf: str):
 
     logger.info(f"Successfully extracted {len(full_text)} characters from policy PDF for insurer {insurer_id}.")
 
-    # 2. Safely chunk the text using LangChain
+    # 2. INCREASED CHUNK SIZE: Larger chunks = fewer API calls to Google
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=150,
+        chunk_size=2000,
+        chunk_overlap=200,
         length_function=len,
     )
     chunks = text_splitter.split_text(full_text)
@@ -190,8 +191,8 @@ async def process_and_embed_policy_pdf(insurer_id: str, base64_pdf: str):
             vectors = embeddings_model.embed_documents(batch_chunks)
         except Exception as e:
             if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                logger.warning("Rate limit hit during embedding. Retrying in 5 seconds...")
-                await asyncio.sleep(5)
+                logger.warning("Rate limit hit during embedding. Retrying in 10 seconds...")
+                await asyncio.sleep(10) # Increased backoff time just to be safe
                 vectors = embeddings_model.embed_documents(batch_chunks)
             else:
                 raise e
@@ -211,8 +212,8 @@ async def process_and_embed_policy_pdf(insurer_id: str, base64_pdf: str):
         else:
             logger.info(f"Inserted batch {i//batch_size + 1} into database.")
         
-        # Small delay to respect Google's Free Tier Rate Limits (100 RPM)
-        await asyncio.sleep(1)
+        # INCREASED DELAY to respect Google's Free Tier Rate Limits (100 RPM)
+        await asyncio.sleep(3)
         
     logger.info(f"Finished processing policy for insurer {insurer_id}. Total {len(chunks)} chunks saved to database.")
     
