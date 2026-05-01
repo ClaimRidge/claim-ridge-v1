@@ -12,3 +12,4 @@ pypdfium2
 python-docx
 xgboost
 pandas
+joblib
