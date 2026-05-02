@@ -26,6 +26,7 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
 
   const [accountType, setAccountType] = useState<string | null>(null);
+  const [isInsurer, setIsInsurer] = useState(false);
   const [orgCode, setOrgCode] = useState<string>("");
   const [parentOrgId, setParentOrgId] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState("");
@@ -34,7 +35,9 @@ export default function SettingsPage() {
   const [formData, setFormData] = useState({
     organizationName: "",
     organizationNameAr: "",
-    licenseNumber: "",
+    cbjLicense: "",
+    commercialLicense: "",
+    country: "Jordan",
     contactEmail: "",
     address: "",
     policyFileBase64: "",
@@ -54,23 +57,28 @@ export default function SettingsPage() {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("*")
+        .select("*, insurers(*)")
         .eq("id", user.id)
         .maybeSingle();
       
       if (profile) {
         setAccountType(profile.account_type);
+        setIsInsurer(!!profile.insurer_id || profile.account_type === "insurance" || profile.role === "admin");
         setOrgCode(profile.org_code || "");
         setParentOrgId(profile.parent_org_id || null);
         
+        const insurer = Array.isArray(profile.insurers) ? profile.insurers[0] : profile.insurers;
+        
         setFormData({
-          organizationName: profile.organization_name || "",
-          organizationNameAr: profile.config_json?.organization_name_ar || "",
-          licenseNumber: profile.license_number || "",
+          organizationName: insurer?.name || profile.organization_name || "",
+          organizationNameAr: insurer?.config_json?.company_name_ar || profile.config_json?.organization_name_ar || "",
+          cbjLicense: insurer?.cbj_operations_license || "",
+          commercialLicense: insurer?.commercial_license_number || profile.license_number || "",
+          country: insurer?.country || "Jordan",
           contactEmail: profile.contact_email || "",
           address: profile.config_json?.address || "",
           policyFileBase64: "",
-          policyFileName: profile.config_json?.policy_file_name || ""
+          policyFileName: insurer?.config_json?.policy_file_name || profile.config_json?.policy_file_name || ""
         });
       }
       setLoading(false);
@@ -87,15 +95,40 @@ export default function SettingsPage() {
     setError("");
 
     try {
-      // Get current profile for config_json merge
-      const { data: existingProfile } = await supabase
+      // 1. Get current profile for insurer_id and config_json merge
+      const { data: profile } = await supabase
         .from("profiles")
-        .select("config_json")
+        .select("*, insurers(*)")
         .eq("id", user.id)
-        .maybeSingle();
+        .single();
 
+      if (!profile) {
+        throw new Error("Profile not found.");
+      }
+
+      // 2. Update Insurers table if applicable
+      if (isInsurer && profile.insurer_id) {
+        const { error: insurerError } = await supabase
+          .from("insurers")
+          .update({
+            name: formData.organizationName,
+            cbj_operations_license: formData.cbjLicense,
+            commercial_license_number: formData.commercialLicense,
+            country: formData.country,
+            config_json: {
+              ...( (Array.isArray(profile.insurers) ? profile.insurers[0] : profile.insurers)?.config_json || {} ),
+              company_name_ar: formData.organizationNameAr,
+              policy_file_name: formData.policyFileName
+            }
+          })
+          .eq("id", profile.insurer_id);
+        
+        if (insurerError) throw insurerError;
+      }
+
+      // 3. Update Profiles table
       const updatedConfig: any = {
-        ...(existingProfile?.config_json || {}),
+        ...(profile?.config_json || {}),
         organization_name_ar: formData.organizationNameAr,
         address: formData.address
       };
@@ -107,15 +140,11 @@ export default function SettingsPage() {
 
       const updateData: any = {
         organization_name: formData.organizationName,
-        license_number: formData.licenseNumber,
+        license_number: isInsurer ? formData.commercialLicense : profile.license_number,
         contact_email: formData.contactEmail,
         config_json: updatedConfig,
         updated_at: new Date().toISOString()
       };
-
-      if (accountType === "insurance" && formData.policyFileName) {
-        updateData.policy_file_name = formData.policyFileName;
-      }
 
       const { error } = await supabase
         .from("profiles")
@@ -124,8 +153,8 @@ export default function SettingsPage() {
 
       if (error) throw error;
       
-      // If insurance changed policy, trigger backend processing
-      if (accountType === "insurance" && formData.policyFileBase64) {
+      // 4. Trigger backend processing if policy changed
+      if (isInsurer && formData.policyFileBase64) {
         const { data: { session } } = await supabase.auth.getSession();
         fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/insurer/process-policy`, {
           method: "POST",
@@ -307,13 +336,49 @@ export default function SettingsPage() {
               className="text-right"
               dir="rtl"
             />
-            <Input
-              label="Facility License Number"
-              value={formData.licenseNumber}
-              onChange={(e) => setFormData({ ...formData, licenseNumber: e.target.value })}
-              icon={FileBadge}
-              required
-            />
+
+            {isInsurer ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="CBJ Operations License"
+                  value={formData.cbjLicense}
+                  onChange={(e) => setFormData({ ...formData, cbjLicense: e.target.value })}
+                  icon={FileBadge}
+                  required
+                />
+                <Input
+                  label="Commercial License Number"
+                  value={formData.commercialLicense}
+                  onChange={(e) => setFormData({ ...formData, commercialLicense: e.target.value })}
+                  icon={FileBadge}
+                  required
+                />
+                <div className="md:col-span-2 space-y-1.5">
+                  <label className="block text-sm font-medium text-gray-700">Country (MENA)</label>
+                  <select
+                    value={formData.country}
+                    onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                    className="w-full h-[42px] px-3.5 py-2 bg-white border border-[#e5e7eb] rounded-lg text-sm text-[#0a0a0a] focus:outline-none focus:ring-2 focus:ring-[#16a34a]/10 focus:border-[#16a34a] transition-all cursor-pointer appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat"
+                  >
+                    {[
+                      "Algeria", "Bahrain", "Egypt", "Iraq", "Jordan", "Kuwait", 
+                      "Lebanon", "Libya", "Morocco", "Oman", "Palestine", "Qatar", 
+                      "Saudi Arabia", "Syria", "Tunisia", "United Arab Emirates", "Yemen"
+                    ].map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <Input
+                label="Facility License Number"
+                value={formData.commercialLicense}
+                onChange={(e) => setFormData({ ...formData, commercialLicense: e.target.value })}
+                icon={FileBadge}
+                required
+              />
+            )}
           </div>
 
           {false && (
@@ -385,19 +450,19 @@ export default function SettingsPage() {
               value={formData.contactEmail}
               onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
               icon={Mail}
-              required={accountType !== "insurance"}
+              required={!isInsurer}
             />
             <Input
               label="Physical Address"
               value={formData.address}
               onChange={(e) => setFormData({ ...formData, address: e.target.value })}
               icon={MapPin}
-              required={accountType !== "insurance"}
+              required={!isInsurer}
             />
           </div>
 
           {/* Section 3: Policy Rules (Insurance Only) */}
-          {true && (
+          {isInsurer && (
             <>
               <div className="lg:col-span-1">
                 <h2 className="font-display font-bold text-lg text-[#0a0a0a]">Policy Guidelines</h2>

@@ -10,7 +10,7 @@ import ClaimRidgeLogo from "@/components/ClaimRidgeLogo";
 interface Insurer {
   id: string;
   name: string;
-  license_number: string;
+  commercial_license_number: string;
 }
 
 export default function DropOffPortal() {
@@ -31,7 +31,7 @@ export default function DropOffPortal() {
   const selectedInsurer = insurers.find(i => i.id === selectedInsurerId);
   const filteredInsurers = insurers.filter(i => 
     i.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (i.license_number && i.license_number.toLowerCase().includes(searchTerm.toLowerCase()))
+    (i.commercial_license_number && i.commercial_license_number.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   // Fetch insurers
@@ -209,7 +209,7 @@ export default function DropOffPortal() {
                             <div className="flex items-center gap-2">
                                <div className="w-1.5 h-1.5 rounded-full bg-[#16a34a]" />
                                <span className="text-xs font-black text-gray-400 uppercase tracking-widest">
-                                 License: {ins.license_number}
+                                 License: {ins.commercial_license_number}
                                </span>
                             </div>
                           </div>
@@ -290,7 +290,7 @@ export default function DropOffPortal() {
                       {selectedInsurer?.name || "Choose a company..."}
                     </h3>
                     {selectedInsurer && (
-                      <p className="text-xs text-[#16a34a] font-medium">Licensed: {selectedInsurer.license_number}</p>
+                      <p className="text-xs text-[#16a34a] font-medium">Licensed: {selectedInsurer.commercial_license_number}</p>
                     )}
                   </div>
                 </div>

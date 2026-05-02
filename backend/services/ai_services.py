@@ -28,17 +28,21 @@ Your job is to review a pre-authorisation request based on multiple clinical doc
 ## PAYER POLICY RULES (RAG Context)
 {policy_rules}
 
+## ANTI-FRAUD SYSTEM FLAGS
+{fraud_context}
+
 ## YOUR TASK & CRITICAL RULES
 1. **IDENTITY VERIFICATION**: You MUST verify that the patient name in the clinical documents matches the "Expected Claim Details" above.
-2. **CLINICAL EVIDENCE CHECK**: If the documents are blank forms or generic instructions, "deny" the request.
-3. **POLICY ADJUDICATION**: Cross-reference the clinical findings against the Payer Policy Rules. If the rules are short or generic (e.g. "Standard medical necessity guidelines apply"), USE YOUR OWN MEDICAL KNOWLEDGE to approve it if standard conservative treatments were attempted.
-4. **DECISION**: Render a decision: "approve", "deny", or "escalate".
-   - **ESCALATE ONLY** if documents explicitly contradict each other.
+2. **FRAUD ANALYSIS**: If any Anti-Fraud Flags are present, analyze the clinical documentation to see if they correlate with clinical inconsistencies (e.g., suspicious visit frequency, mismatched diagnosis). Provide a clear reason in your rationale.
+3. **CLINICAL EVIDENCE CHECK**: If the documents are blank forms or generic instructions, "deny" the request.
+4. **POLICY ADJUDICATION**: Cross-reference the clinical findings against the Payer Policy Rules. If the rules are short or generic (e.g. "Standard medical necessity guidelines apply"), USE YOUR OWN MEDICAL KNOWLEDGE to approve it if standard conservative treatments were attempted.
+5. **DECISION**: Render a decision: "approve", "deny", or "escalate".
+   - **ESCALATE** if fraud is strongly suspected or documents explicitly contradict each other.
 
 Respond ONLY with valid JSON in this exact format:
 {{
     "decision": "approve" | "deny" | "escalate",
-    "rationale": "Provide a clear justification."
+    "rationale": "Provide a clear justification, including fraud analysis if applicable."
 }}
 """
 
@@ -141,6 +145,27 @@ async def check_fraud_system(request_data: dict) -> dict:
         }
 
 
+async def process_pre_auth_case(pre_auth_id: str, insurer_id: str, attachments: list):
+    """Background task to handle OCR extraction and AI evaluation."""
+    logger.info(f"Starting background processing for Pre-Auth: {pre_auth_id}")
+    
+    # 1. Perform OCR on all documents
+    for att in attachments:
+        try:
+            # att is a dict with file_name, content_type, content (base64)
+            extracted_text = await extract_text_from_file(att["content"], att["content_type"])
+            
+            # Update the existing document record with extracted text
+            supabase.table("pre_auth_documents").update({
+                "extracted_text": extracted_text
+            }).eq("pre_auth_id", pre_auth_id).eq("file_name", att["file_name"]).execute()
+            
+        except Exception as e:
+            logger.error(f"Background OCR failed for {att['file_name']}: {e}")
+
+    # 2. Run the actual clinical evaluation
+    await evaluate_pre_auth(pre_auth_id, insurer_id)
+
 # --- CORE SERVICES ---
 async def evaluate_pre_auth(pre_auth_id: str, insurer_id: str):
     """Orchestrates the 2-Layer Defense: Fraud Model -> RAG Policy -> LLM Clinical Triage."""
@@ -153,23 +178,15 @@ async def evaluate_pre_auth(pre_auth_id: str, insurer_id: str):
         return
     request_data = req_res.data[0]
 
-    # ==========================================
-    # LAYER 1: STATISTICAL FRAUD DETECTION
-    # ==========================================
     fraud_result = await check_fraud_system(request_data)
+    fraud_context = "No significant statistical fraud flags detected."
     
     if fraud_result["risk_level"] == "high":
         flags_str = ", ".join(fraud_result["flags"])
-        rationale = f"ESCALATED BY ANTI-FRAUD SYSTEM (Risk Score: {fraud_result['fraud_score']}%). Flags detected: {flags_str}."
-        
-        supabase.table("pre_auth_requests").update({
-            "status": "escalated",
-            "ai_decision": "escalate",
-            "ai_rationale": rationale
-        }).eq("id", pre_auth_id).execute()
-        
-        logger.warning(f"Pre-Auth {pre_auth_id} halted by Fraud System. Esculated to human.")
-        return # Halt processing immediately. No need to waste LLM tokens.
+        fraud_context = f"CRITICAL WARNING: The anti-fraud system has flagged this claim as HIGH RISK (Score: {fraud_result['fraud_score']}%). Flags: {flags_str}. Please scrutinize the clinical documents for inconsistencies."
+    elif fraud_result["risk_level"] == "medium":
+        flags_str = ", ".join(fraud_result["flags"])
+        fraud_context = f"NOTICE: Medium risk flags detected: {flags_str}."
 
     # ==========================================
     # LAYER 2: CLINICAL LLM TRIAGE
@@ -179,6 +196,12 @@ async def evaluate_pre_auth(pre_auth_id: str, insurer_id: str):
     
     if not docs_res.data:
         logger.error("No documents found for this pre-auth.")
+        # If no docs, we can't evaluate, but we should at least update status to show we tried
+        supabase.table("pre_auth_requests").update({
+            "status": "escalated",
+            "ai_decision": "escalate",
+            "ai_rationale": "No documents found for clinical review."
+        }).eq("id", pre_auth_id).execute()
         return
 
     # 3. Combine all documents into one context window
@@ -207,7 +230,8 @@ async def evaluate_pre_auth(pre_auth_id: str, insurer_id: str):
         expected_patient_name=request_data.get("patient_name", "Unknown"),
         expected_patient_id=request_data.get("patient_id", "Unknown"),
         expected_provider_name=request_data.get("provider_name", "Unknown"),
-        policy_rules=policy_rules
+        policy_rules=policy_rules,
+        fraud_context=fraud_context
     )
     
     messages = [

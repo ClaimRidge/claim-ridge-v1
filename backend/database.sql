@@ -3,16 +3,15 @@
 
 CREATE TABLE public.ai_inference_log (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
-  claim_id uuid,
+  pre_auth_id uuid,
   model_version text NOT NULL,
   prompt_template_name text,
   input_data jsonb NOT NULL,
   output_data jsonb NOT NULL,
-  confidence_score numeric,
   latency_ms integer,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT ai_inference_log_pkey PRIMARY KEY (id),
-  CONSTRAINT ai_inference_log_claim_id_fkey FOREIGN KEY (claim_id) REFERENCES public.claims(id)
+  CONSTRAINT ai_inference_log_pre_auth_id_fkey FOREIGN KEY (pre_auth_id) REFERENCES public.pre_auth_requests(id)
 );
 CREATE TABLE public.audit_log (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -22,105 +21,70 @@ CREATE TABLE public.audit_log (
   target_type text NOT NULL,
   payload_hash text NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT audit_log_pkey PRIMARY KEY (id)
+  CONSTRAINT audit_log_pkey PRIMARY KEY (id),
+  CONSTRAINT audit_log_actor_id_fkey FOREIGN KEY (actor_id) REFERENCES public.profiles(id)
 );
-CREATE TABLE public.claim_lines (
+CREATE TABLE public.insurers (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
-  claim_id uuid NOT NULL,
-  cpt_code text NOT NULL,
-  icd10_code text NOT NULL,
-  units integer DEFAULT 1,
-  billed_amount numeric NOT NULL DEFAULT 0,
-  allowed_amount numeric DEFAULT 0,
-  denial_reason text,
-  metadata jsonb DEFAULT '{}'::jsonb,
-  CONSTRAINT claim_lines_pkey PRIMARY KEY (id),
-  CONSTRAINT claim_lines_claim_id_fkey FOREIGN KEY (claim_id) REFERENCES public.claims(id)
-);
-CREATE TABLE public.claims (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  provider_id uuid,
-  payer_id uuid,
-  member_id text,
-  date_of_service date NOT NULL,
-  status text NOT NULL DEFAULT 'intake_complete'::text,
-  total_billed numeric NOT NULL DEFAULT 0,
-  total_allowed numeric DEFAULT 0,
-  currency text DEFAULT 'JOD'::text,
-  ai_risk_score integer CHECK (ai_risk_score >= 0 AND ai_risk_score <= 100),
-  ai_complexity_score integer CHECK (ai_complexity_score >= 1 AND ai_complexity_score <= 5),
+  name text NOT NULL,
+  country_code text DEFAULT 'JOR'::text,
+  config_json jsonb DEFAULT '{}'::jsonb,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
-  user_id uuid,
-  clinic_id uuid,
-  claim_number text UNIQUE,
-  patient_name text,
-  patient_id text,
-  provider_name text,
-  payer_name text,
-  diagnosis_codes ARRAY,
-  procedure_codes ARRAY,
-  billed_amount numeric DEFAULT 0,
-  notes text,
-  scrub_result jsonb DEFAULT '{}'::jsonb,
-  scrub_passed boolean DEFAULT false,
-  scrub_warnings integer DEFAULT 0,
-  payer_name_raw text,
-  needs_entity_mapping boolean DEFAULT false,
-  ai_recommendation text,
-  CONSTRAINT claims_pkey PRIMARY KEY (id),
-  CONSTRAINT claims_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT claims_clinic_id_fkey FOREIGN KEY (clinic_id) REFERENCES auth.users(id)
-);
-CREATE TABLE public.claims_audit (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  user_id uuid,
-  claim_reference_number text,
-  patient_name text,
-  date_of_service date,
-  provider_name text,
-  payer_name text,
-  diagnosis_codes ARRAY,
-  procedure_codes ARRAY,
-  billed_amount numeric,
-  ai_flags jsonb DEFAULT '[]'::jsonb,
-  ai_corrections jsonb DEFAULT '{}'::jsonb,
-  export_count integer DEFAULT 0,
-  created_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT claims_audit_pkey PRIMARY KEY (id),
-  CONSTRAINT claims_audit_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
-);
-CREATE TABLE public.doctor_orgs (
-  doctor_id uuid NOT NULL,
-  org_id uuid NOT NULL,
-  joined_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT doctor_orgs_pkey PRIMARY KEY (doctor_id, org_id),
-  CONSTRAINT doctor_orgs_doctor_id_fkey FOREIGN KEY (doctor_id) REFERENCES auth.users(id),
-  CONSTRAINT doctor_orgs_org_id_fkey FOREIGN KEY (org_id) REFERENCES auth.users(id)
+  cbj_operations_license text UNIQUE,
+  commercial_license_number text UNIQUE,
+  country text DEFAULT 'Jordan'::text,
+  CONSTRAINT insurers_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.policy_chunks (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   insurer_id uuid,
   content text NOT NULL,
   embedding USER-DEFINED,
+  created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT policy_chunks_pkey PRIMARY KEY (id),
-  CONSTRAINT policy_chunks_insurer_id_fkey FOREIGN KEY (insurer_id) REFERENCES public.profiles(id)
+  CONSTRAINT policy_chunks_insurer_id_fkey FOREIGN KEY (insurer_id) REFERENCES public.insurers(id)
+);
+CREATE TABLE public.pre_auth_documents (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  pre_auth_id uuid,
+  file_name text NOT NULL,
+  file_type text NOT NULL,
+  extracted_text text,
+  created_at timestamp with time zone DEFAULT now(),
+  file_base64 text,
+  CONSTRAINT pre_auth_documents_pkey PRIMARY KEY (id),
+  CONSTRAINT pre_auth_documents_pre_auth_id_fkey FOREIGN KEY (pre_auth_id) REFERENCES public.pre_auth_requests(id)
+);
+CREATE TABLE public.pre_auth_requests (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  insurer_id uuid,
+  reference_number text NOT NULL UNIQUE,
+  provider_name text NOT NULL,
+  patient_name text NOT NULL,
+  patient_id text NOT NULL,
+  requested_amount numeric DEFAULT 0,
+  currency text DEFAULT 'JOD'::text,
+  status text NOT NULL DEFAULT 'processing'::text,
+  sla_deadline timestamp with time zone NOT NULL,
+  assigned_to uuid,
+  ai_decision text,
+  ai_rationale text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT pre_auth_requests_pkey PRIMARY KEY (id),
+  CONSTRAINT pre_auth_requests_insurer_id_fkey FOREIGN KEY (insurer_id) REFERENCES public.insurers(id),
+  CONSTRAINT pre_auth_requests_assigned_to_fkey FOREIGN KEY (assigned_to) REFERENCES public.profiles(id)
 );
 CREATE TABLE public.profiles (
   id uuid NOT NULL,
-  updated_at timestamp with time zone DEFAULT now(),
-  account_type USER-DEFINED NOT NULL,
-  organization_name text NOT NULL,
-  license_number text UNIQUE,
-  payer_code text UNIQUE,
+  insurer_id uuid,
+  role text NOT NULL DEFAULT 'medical_officer'::text,
+  full_name text,
   contact_email text,
-  country_code text DEFAULT 'JOR'::text,
-  config_json jsonb DEFAULT '{}'::jsonb,
-  policy_file_path text,
-  policy_file_name text,
-  org_code text UNIQUE,
-  parent_org_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
   CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
-  CONSTRAINT profiles_parent_org_id_fkey FOREIGN KEY (parent_org_id) REFERENCES auth.users(id)
+  CONSTRAINT profiles_insurer_id_fkey FOREIGN KEY (insurer_id) REFERENCES public.insurers(id)
 );

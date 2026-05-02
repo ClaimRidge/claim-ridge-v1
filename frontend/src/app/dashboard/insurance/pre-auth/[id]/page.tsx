@@ -40,6 +40,7 @@ interface PreAuthDocument {
   file_name: string;
   file_type: string;
   extracted_text: string;
+  file_base64?: string;
 }
 
 export default function PreAuthReviewPage() {
@@ -89,6 +90,25 @@ export default function PreAuthReviewPage() {
 
     fetchData();
   }, [params.id, supabase]);
+
+  // Polling for updates if still processing
+  useEffect(() => {
+    if (request?.status !== "processing") return;
+
+    const interval = setInterval(async () => {
+      const { data } = await supabase
+        .from("pre_auth_requests")
+        .select("*")
+        .eq("id", params.id)
+        .single();
+
+      if (data && data.status !== "processing") {
+        setRequest(data);
+      }
+    }, 3000); // Poll every 3 seconds for a responsive feel
+
+    return () => clearInterval(interval);
+  }, [request?.status, params.id, supabase]);
 
   const handleDecision = async () => {
     if (!modal || !request) return;
@@ -206,15 +226,52 @@ export default function PreAuthReviewPage() {
                 </button>
               ))}
             </div>
-            <div className="p-8 flex-1 overflow-y-auto bg-[#fafafa]">
+            <div className="p-0 flex-1 overflow-hidden bg-[#fafafa] flex flex-col min-h-[700px]">
               {activeDoc ? (
-                <div className="prose prose-sm prose-slate max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {documents.find(d => d.id === activeDoc)?.extracted_text || "No text extracted."}
-                  </ReactMarkdown>
-                </div>
+                (() => {
+                  const doc = documents.find(d => d.id === activeDoc);
+                  if (!doc) return <div className="p-10 text-center text-gray-500">Document not found.</div>;
+                  
+                  if (doc.file_base64) {
+                    if (doc.file_type === "application/pdf") {
+                      return (
+                        <iframe 
+                          src={`data:application/pdf;base64,${doc.file_base64}#toolbar=0&navpanes=0&scrollbar=1`} 
+                          className="w-full h-full border-0 flex-1"
+                          title={doc.file_name}
+                        />
+                      );
+                    } else if (doc.file_type.startsWith("image/")) {
+                      return (
+                        <div className="w-full h-full flex items-center justify-center p-4 bg-gray-50 overflow-auto">
+                          <img 
+                            src={`data:${doc.file_type};base64,${doc.file_base64}`} 
+                            alt={doc.file_name} 
+                            className="max-w-full max-h-full object-contain shadow-xl rounded-lg border border-gray-200"
+                          />
+                        </div>
+                      );
+                    }
+                  }
+                  
+                  return (
+                    <div className="flex flex-col items-center justify-center h-full p-12 text-center">
+                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                        <FileText className="h-8 w-8 text-gray-400" />
+                      </div>
+                      <h3 className="text-lg font-bold text-gray-900">Preview Unavailable</h3>
+                      <p className="text-sm text-gray-500 mt-2 max-w-sm">
+                        The real document ({doc.file_name}) cannot be previewed. 
+                        Only PDF and Image files are supported for inline viewing.
+                      </p>
+                    </div>
+                  );
+                })()
               ) : (
-                <p className="text-sm text-[#9ca3af] text-center mt-10">No documents attached.</p>
+                <div className="flex flex-col items-center justify-center h-full text-[#9ca3af]">
+                  <FileText className="h-12 w-12 mb-3 opacity-20" />
+                  <p className="text-sm font-medium tracking-wide">Select a document to preview</p>
+                </div>
               )}
             </div>
           </div>
@@ -266,7 +323,9 @@ export default function PreAuthReviewPage() {
                 <div className={`inline-flex items-center justify-center w-12 h-12 rounded-full mb-3 ${request.status === "approve" ? "bg-green-100" : "bg-red-100"}`}>
                   {request.status === "approve" ? <CheckCircle className="h-6 w-6 text-[#16a34a]" /> : <XCircle className="h-6 w-6 text-red-600" />}
                 </div>
-                <p className="font-bold text-[#0a0a0a]">This request was {request.status}d.</p>
+                <p className="font-bold text-[#0a0a0a]">
+                  This request was {request.status === "approve" ? "approved" : "denied"}.
+                </p>
               </div>
             ) : (
               <div className="space-y-3">

@@ -6,7 +6,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from core.database import supabase
-from services.ai_services import extract_text_from_file, evaluate_pre_auth
+from services.ai_services import extract_text_from_file, evaluate_pre_auth, process_pre_auth_case
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def generate_reference():
 async def get_public_insurers():
     """Fetches real, registered insurance companies from the insurers table."""
     try:
-        res = supabase.table("insurers").select("id, name, license_number").execute()
+        res = supabase.table("insurers").select("id, name, commercial_license_number").execute()
         if not res.data:
             return []
         
@@ -69,20 +69,38 @@ async def submit_dropoff(payload: DropoffRequest, background_tasks: BackgroundTa
         
     pre_auth_id = insert_res.data[0]["id"]
 
-    # 2. Process Attachments Synchronously
+    # 2. Insert Documents Immediately (for instant viewing)
+    doc_payloads = []
+    attachments_data = []
     for att in payload.attachments:
-        try:
-            extracted_text = await extract_text_from_file(att.content, att.content_type)
-            supabase.table("pre_auth_documents").insert({
-                "pre_auth_id": pre_auth_id,
-                "file_name": att.file_name,
-                "file_type": att.content_type,
-                "extracted_text": extracted_text
-            }).execute()
-        except Exception as e:
-            logger.error(f"Failed to process attachment {att.file_name}: {e}")
+        doc_payloads.append({
+            "pre_auth_id": pre_auth_id,
+            "file_name": att.file_name,
+            "file_type": att.content_type,
+            "extracted_text": "", # Will be filled by background task
+            "file_base64": att.content
+        })
+        # Save attachment data for background OCR
+        attachments_data.append({
+            "file_name": att.file_name,
+            "content_type": att.content_type,
+            "content": att.content
+        })
 
-    # 3. Trigger AI Triage Reasoning in background
-    background_tasks.add_task(evaluate_pre_auth, pre_auth_id, payload.insurer_id)
+    if doc_payloads:
+        try:
+            supabase.table("pre_auth_documents").insert(doc_payloads).execute()
+        except Exception as e:
+            # If the column is missing, try inserting without the base64 content
+            if "file_base64" in str(e):
+                logger.warning("Database column 'file_base64' is missing. Documents will be stored without previews. Please run the SQL migration.")
+                for doc in doc_payloads:
+                    doc.pop("file_base64", None)
+                supabase.table("pre_auth_documents").insert(doc_payloads).execute()
+            else:
+                raise e
+
+    # 3. Trigger Background OCR and Analysis
+    background_tasks.add_task(process_pre_auth_case, pre_auth_id, payload.insurer_id, attachments_data)
     
     return {"status": "success", "reference_number": ref_number}

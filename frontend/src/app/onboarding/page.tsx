@@ -20,7 +20,9 @@ export default function OnboardingPage() {
   const [insuranceDetails, setInsuranceDetails] = useState({
     companyNameEn: "",
     companyNameAr: "",
-    licenseNumber: "",
+    cbjLicense: "",
+    commercialLicense: "",
+    country: "Jordan",
     policyFileBase64: "",
     policyFileName: ""
   });
@@ -50,6 +52,12 @@ export default function OnboardingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!insuranceDetails.policyFileBase64) {
+      setError("Please upload your Medical Guidelines & Policy Rules document.");
+      return;
+    }
+
     setError("");
     setLoading(true);
 
@@ -61,7 +69,9 @@ export default function OnboardingPage() {
         .from("insurers")
         .insert({
           name: insuranceDetails.companyNameEn,
-          license_number: insuranceDetails.licenseNumber,
+          cbj_operations_license: insuranceDetails.cbjLicense,
+          commercial_license_number: insuranceDetails.commercialLicense,
+          country: insuranceDetails.country,
           config_json: {
             company_name_ar: insuranceDetails.companyNameAr,
             policy_file_name: insuranceDetails.policyFileName
@@ -71,8 +81,10 @@ export default function OnboardingPage() {
         .single();
 
       if (insurerError) {
-        if (insurerError.message.includes("insurers_license_number_key") || insurerError.code === '23505') {
-          throw new Error("This License Number is already registered. Please use a unique license number.");
+        if (insurerError.message.includes("insurers_cbj_operations_license_key") || 
+            insurerError.message.includes("insurers_commercial_license_number_key") || 
+            insurerError.code === '23505') {
+          throw new Error("One of the license numbers is already registered. Please use unique license numbers.");
         }
         throw new Error(insurerError.message || "Failed to create Insurer workspace.");
       }
@@ -156,7 +168,10 @@ export default function OnboardingPage() {
           <form onSubmit={handleSubmit} className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-gray-100">
               <div className="space-y-4">
-                <h3 className="font-semibold text-gray-900">Company Identity</h3>
+                <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2">
+                  <div className="w-1 h-5 bg-blue-600 rounded-full" />
+                  Company Identity
+                </h3>
                 <Input 
                   id="companyNameEn" 
                   label="Company Name (English)" 
@@ -173,27 +188,60 @@ export default function OnboardingPage() {
                   onChange={e => setInsuranceDetails({...insuranceDetails, companyNameAr: e.target.value})} 
                   placeholder="e.g. شركة التأمين"
                 />
+                
+                <div className="space-y-1.5">
+                  <label htmlFor="country" className="block text-sm font-medium text-gray-700">
+                    Country (MENA)
+                  </label>
+                  <select
+                    id="country"
+                    value={insuranceDetails.country}
+                    onChange={e => setInsuranceDetails({...insuranceDetails, country: e.target.value})}
+                    className="w-full h-[46px] px-3.5 py-2.5 bg-white border border-[#e5e7eb] rounded-lg text-sm text-[#0a0a0a] focus:outline-none focus:ring-2 focus:ring-[#16a34a]/10 focus:border-[#16a34a] transition-all cursor-pointer appearance-none bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E')] bg-[length:20px_20px] bg-[right_10px_center] bg-no-repeat"
+                    required
+                  >
+                    {[
+                      "Algeria", "Bahrain", "Egypt", "Iraq", "Jordan", "Kuwait", 
+                      "Lebanon", "Libya", "Morocco", "Oman", "Palestine", "Qatar", 
+                      "Saudi Arabia", "Syria", "Tunisia", "United Arab Emirates", "Yemen"
+                    ].map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="space-y-4">
-                <h3 className="font-semibold text-gray-900">Legal Verification</h3>
+                <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2">
+                  <div className="w-1 h-5 bg-blue-600 rounded-full" />
+                  Legal Verification
+                </h3>
                 <Input 
-                  id="licenseNumberIns" 
-                  label="License Number" 
-                  value={insuranceDetails.licenseNumber} 
-                  onChange={e => setInsuranceDetails({...insuranceDetails, licenseNumber: e.target.value})} 
+                  id="cbjLicense" 
+                  label="CBJ Operations License" 
+                  value={insuranceDetails.cbjLicense} 
+                  onChange={e => setInsuranceDetails({...insuranceDetails, cbjLicense: e.target.value})} 
                   required 
-                  placeholder="e.g. INS-1004"
+                  placeholder="e.g. CBJ-OPS-1234"
+                  disabled={loading}
+                />
+                <Input 
+                  id="commercialLicense" 
+                  label="Commercial License Number" 
+                  value={insuranceDetails.commercialLicense} 
+                  onChange={e => setInsuranceDetails({...insuranceDetails, commercialLicense: e.target.value})} 
+                  required 
+                  placeholder="e.g. COM-5678"
                   disabled={loading}
                 />
                 <p className="text-xs text-gray-500 mt-2">
-                  Enter your official regulatory license number to verify your organization. This must be unique.
+                  Enter your official regulatory license numbers to verify your organization. These must be unique.
                 </p>
               </div>
             </div>
 
             <div className="bg-[#fcfdfc] border border-[#f0fdf4] rounded-2xl p-6 shadow-sm">
               <label className="block text-base font-bold text-[#0a0a0a] mb-1">
-                Medical Guidelines & Policy Rules <span className="text-gray-400 font-normal text-sm">(Optional)</span>
+                Medical Guidelines & Policy Rules <span className="text-red-500 font-normal text-sm">*</span>
               </label>
               <p className="text-sm text-[#6b7280] mb-4">
                 Upload your policy guidelines as a PDF or Word document. ClaimRidge will use this to automatically evaluate incoming pre-auths.
@@ -203,6 +251,7 @@ export default function OnboardingPage() {
                 <input 
                   type="file" 
                   accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  required
                   disabled={loading}
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
@@ -230,9 +279,22 @@ export default function OnboardingPage() {
               </div>
             </div>
             
-            <Button type="submit" loading={loading} className="w-full" size="lg">
-              {loading ? (loadingText || "Processing...") : "Finish Setup"}
-            </Button>
+            <div className="pt-2">
+              <Button type="submit" loading={loading} className="w-full" size="lg">
+                {loading ? (loadingText || "Processing...") : "Finish Setup"}
+              </Button>
+              
+              <button
+                type="button"
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  router.push("/login");
+                }}
+                className="w-full mt-4 text-sm text-gray-500 hover:text-gray-800 transition-colors font-medium flex items-center justify-center gap-2"
+              >
+                Cancel and Sign Out
+              </button>
+            </div>
           </form>
         </div>
       </div>
