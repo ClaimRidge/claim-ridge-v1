@@ -13,3 +13,4 @@ python-docx
 xgboost
 pandas
 joblib
+scikit-learn
