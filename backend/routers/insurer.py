@@ -1,8 +1,8 @@
 import logging
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from core.security import get_current_user
 from core.database import supabase
 from services import audit
@@ -10,6 +10,103 @@ from services import audit
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/insurer", tags=["insurer"])
+
+
+# ---------------------------------------------------------------------------
+# Pre-Auth automation settings (per-insurer)
+# ---------------------------------------------------------------------------
+_VALID_MODES = {"off", "shadow", "advisory", "auto_both"}
+
+
+class PreAuthAutomationConfig(BaseModel):
+    """Shape stored at insurers.config.pre_auth_automation.
+
+    Modes:
+      off       — pre-auth queue stays fully manual (no AI run).
+      shadow    — AI runs and records a recommendation; every request still
+                  goes to the manual queue. Use for measuring agreement.
+      advisory  — AI runs and the recommendation is shown next to the queue
+                  row; reviewer still decides every request.
+      auto_both — AI may auto-approve AND auto-deny when confidence >=
+                  threshold AND all citations verify. Other requests escalate.
+    """
+    mode: str = Field("off")
+    confidence_threshold: float = Field(0.90, ge=0.0, le=1.0)
+    auto_decision_max_amount: float = Field(5000.0, ge=0.0)
+    always_review_specialties: List[str] = []
+    always_review_cpts: List[str] = []
+    auto_revocation_window_hours: int = Field(72, ge=0)
+
+
+def _require_insurer(current_user) -> str:
+    profile_res = supabase.table("profiles").select("insurer_id").eq("id", current_user.id).execute()
+    if not profile_res.data or not profile_res.data[0].get("insurer_id"):
+        raise HTTPException(status_code=403, detail="User is not associated with an insurer.")
+    return profile_res.data[0]["insurer_id"]
+
+
+@router.get("/pre-auth-automation")
+async def get_pre_auth_automation(current_user = Depends(get_current_user)):
+    """Read the insurer's pre-auth automation config. Defaults are returned
+    when the insurer has not saved one yet."""
+    insurer_id = _require_insurer(current_user)
+    try:
+        res = supabase.table("insurers").select("config").eq("id", insurer_id).maybe_single().execute()
+        cfg = ((res.data or {}).get("config") or {}).get("pre_auth_automation") or {}
+    except Exception as e:
+        logger.error(f"failed to read automation config for {insurer_id}: {e}")
+        cfg = {}
+    merged = PreAuthAutomationConfig(**{**PreAuthAutomationConfig().model_dump(), **cfg})
+    return {"insurer_id": insurer_id, "config": merged.model_dump()}
+
+
+@router.put("/pre-auth-automation")
+async def update_pre_auth_automation(
+    payload: PreAuthAutomationConfig, current_user = Depends(get_current_user)
+):
+    """Write the insurer's pre-auth automation config. Stored at
+    insurers.config.pre_auth_automation. Returns the persisted block."""
+    insurer_id = _require_insurer(current_user)
+    if payload.mode not in _VALID_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"mode must be one of {sorted(_VALID_MODES)}",
+        )
+
+    # Read existing config so we don't clobber unrelated keys an insurer may
+    # have saved (e.g. pre_auth_validity_days).
+    try:
+        res = supabase.table("insurers").select("config").eq("id", insurer_id).maybe_single().execute()
+        existing = (res.data or {}).get("config") or {}
+    except Exception as e:
+        logger.error(f"failed to read existing config for {insurer_id}: {e}")
+        existing = {}
+
+    new_block = payload.model_dump()
+    new_config = {**existing, "pre_auth_automation": new_block}
+
+    try:
+        supabase.table("insurers").update({
+            "config": new_config,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", insurer_id).execute()
+    except Exception as e:
+        logger.error(f"failed to write automation config for {insurer_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save automation config.")
+
+    audit.record_event(
+        action="pre_auth_automation_updated",
+        category="action",
+        actor_id=current_user.id,
+        tenant_type="insurer",
+        tenant_id=insurer_id,
+        target_type="insurer",
+        target_id=insurer_id,
+        summary=f"Pre-auth automation mode set to '{payload.mode}'",
+        metadata=new_block,
+    )
+
+    return {"insurer_id": insurer_id, "config": new_block}
 
 
 # ---------------------------------------------------------------------------

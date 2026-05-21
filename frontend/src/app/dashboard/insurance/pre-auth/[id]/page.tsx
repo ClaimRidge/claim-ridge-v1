@@ -20,6 +20,37 @@ import {
   X,
 } from "lucide-react";
 
+interface AiCriterion {
+  criterion?: string;
+  policy_chunk_id?: string;
+  policy_quote?: string;
+  clinical_quote?: string;
+  reason?: string;
+}
+
+interface AiRationale {
+  mode?: string;
+  recommendation?: string;
+  confidence?: number;
+  rationale?: string;
+  criteria_met?: AiCriterion[];
+  criteria_failed?: AiCriterion[];
+  missing_information?: string[];
+  reviewer_notes?: string;
+  citations_ok?: boolean;
+  citation_problems?: string[];
+  policy_chunks_retrieved?: string[];
+  model_version?: string;
+  guardrail?: { reason: string; detail: string };
+  override_notice?: {
+    at: string;
+    reason: string | null;
+    overridden_from: string;
+    overridden_to: string;
+    reviewer_id: string;
+  };
+}
+
 interface PreAuthRequest {
   id: string;
   reference_number: string;
@@ -39,7 +70,31 @@ interface PreAuthRequest {
   valid_until?: string | null;
   approved_procedures?: string[] | null;
   issued_at?: string | null;
+  // AI advisor fields (see migration 017)
+  ai_recommendation?: string | null;
+  ai_confidence?: number | null;
+  ai_decision_status?: string | null;
+  ai_evaluated_at?: string | null;
+  ai_rationale?: AiRationale | null;
+  decision_override_reason?: string | null;
 }
+
+const AI_STATUS_PILL: Record<string, { label: string; cls: string }> = {
+  pending: { label: "AI Pending", cls: "bg-gray-50 text-gray-600 border-gray-200" },
+  shadow: { label: "Shadow", cls: "bg-slate-50 text-slate-700 border-slate-200" },
+  advisory: { label: "Advisory", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  auto_approved: { label: "Auto-Approved", cls: "bg-green-50 text-green-700 border-green-200" },
+  auto_denied: { label: "Auto-Denied", cls: "bg-red-50 text-red-700 border-red-200" },
+  auto_escalated: { label: "Escalated", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  overridden: { label: "Overridden", cls: "bg-purple-50 text-purple-700 border-purple-200" },
+  failed: { label: "AI Failed", cls: "bg-red-50 text-red-700 border-red-200" },
+};
+
+const REC_PILL: Record<string, { label: string; cls: string }> = {
+  approve: { label: "Approve", cls: "bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0]" },
+  deny: { label: "Deny", cls: "bg-red-50 text-red-700 border-red-200" },
+  review: { label: "Review", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+};
 
 interface PreAuthDocument {
   id: string;
@@ -79,6 +134,7 @@ export default function PreAuthReviewPage() {
   const [viewMode, setViewMode] = useState<"visual" | "text">("visual");
   const [modal, setModal] = useState<"approve" | "deny" | null>(null);
   const [reason, setReason] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [activeBlobUrl, setActiveBlobUrl] = useState<string | null>(null);
 
@@ -160,7 +216,11 @@ export default function PreAuthReviewPage() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ action: modal, reason }),
+        body: JSON.stringify({
+          action: modal,
+          reason,
+          override_reason: overrideReason.trim() || undefined,
+        }),
       });
 
       if (!res.ok) throw new Error("Failed to submit decision");
@@ -171,6 +231,7 @@ export default function PreAuthReviewPage() {
       if (refreshed?.request) setRequest(refreshed.request);
       setModal(null);
       setReason("");
+      setOverrideReason("");
     } catch (err) {
       console.error(err);
       alert("An error occurred while submitting your decision.");
@@ -393,6 +454,132 @@ export default function PreAuthReviewPage() {
         {/* RIGHT COLUMN: Reviewer Decision */}
         <div className="flex flex-col gap-6">
 
+          {/* AI Advisor panel — runs after OCR for in-network requests.
+              Shows the recommendation, confidence, citations, and (if the
+              reviewer is about to override an auto-decision) an override
+              reason capture in the decision modal below. */}
+          {(() => {
+            const aiStatus = request.ai_decision_status;
+            if (!aiStatus) return null;
+            const rationale = request.ai_rationale || {};
+            const statusPillCfg = AI_STATUS_PILL[aiStatus] || { label: aiStatus, cls: "bg-gray-100 text-gray-600 border-gray-200" };
+            const rec = request.ai_recommendation || "";
+            const recPillCfg = REC_PILL[rec];
+            const conf = typeof request.ai_confidence === "number" ? request.ai_confidence : null;
+            const isAuto = aiStatus === "auto_approved" || aiStatus === "auto_denied";
+            const wasOverridden = aiStatus === "overridden";
+            const override = rationale.override_notice;
+            return (
+              <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-display font-bold text-[#0a0a0a] flex items-center gap-2">
+                    <BrainCircuit className="h-4 w-4 text-[#00B4A6]" /> AI Advisor
+                  </h3>
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${statusPillCfg.cls}`}>
+                    {statusPillCfg.label}
+                  </span>
+                </div>
+
+                {rationale.guardrail ? (
+                  <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
+                    <p className="font-bold text-amber-800 mb-0.5">Guardrail hit: {rationale.guardrail.reason}</p>
+                    <p className="text-amber-700">{rationale.guardrail.detail}</p>
+                    <p className="text-[11px] text-amber-700 mt-1">Routed straight to manual review — the LLM did not run.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 mb-3">
+                      {recPillCfg && (
+                        <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${recPillCfg.cls}`}>
+                          Recommends: {recPillCfg.label}
+                        </span>
+                      )}
+                      {conf !== null && (
+                        <span className="text-[11px] font-mono text-[#6b7280]">
+                          Confidence {(conf * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                    {isAuto && !wasOverridden && !isDecided && (
+                      <p className="text-[11px] text-[#6b7280] mb-3 leading-relaxed">
+                        The advisor auto-decided this request. Confirm it, or override below — overrides are recorded in the audit trail and the submitter is notified.
+                      </p>
+                    )}
+                    {rationale.rationale && (
+                      <p className="text-sm text-[#374151] leading-relaxed mb-3 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        {rationale.rationale}
+                      </p>
+                    )}
+
+                    {(rationale.criteria_met?.length ?? 0) > 0 && (
+                      <div className="mb-3">
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-[#16a34a] font-black mb-1.5">Criteria met</p>
+                        <ul className="space-y-2">
+                          {rationale.criteria_met!.map((c, i) => (
+                            <li key={`met-${i}`} className="text-xs border-l-2 border-[#bbf7d0] pl-2">
+                              <p className="font-bold text-[#0a0a0a]">{c.criterion}</p>
+                              {c.policy_quote && (
+                                <p className="text-[#6b7280] italic mt-0.5">Policy: &quot;{c.policy_quote}&quot;</p>
+                              )}
+                              {c.clinical_quote && (
+                                <p className="text-[#374151] mt-0.5">Clinical: &quot;{c.clinical_quote}&quot;</p>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {(rationale.criteria_failed?.length ?? 0) > 0 && (
+                      <div className="mb-3">
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-red-700 font-black mb-1.5">Criteria failed</p>
+                        <ul className="space-y-2">
+                          {rationale.criteria_failed!.map((c, i) => (
+                            <li key={`failed-${i}`} className="text-xs border-l-2 border-red-200 pl-2">
+                              <p className="font-bold text-[#0a0a0a]">{c.criterion}</p>
+                              {c.policy_quote && (
+                                <p className="text-[#6b7280] italic mt-0.5">Policy: &quot;{c.policy_quote}&quot;</p>
+                              )}
+                              {c.reason && (
+                                <p className="text-[#374151] mt-0.5">{c.reason}</p>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {(rationale.missing_information?.length ?? 0) > 0 && (
+                      <div className="mb-3 text-xs bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <p className="font-bold text-amber-800 mb-1">Missing information</p>
+                        <ul className="list-disc list-inside text-amber-700 space-y-0.5">
+                          {rationale.missing_information!.map((m, i) => <li key={i}>{m}</li>)}
+                        </ul>
+                      </div>
+                    )}
+
+                    {rationale.citations_ok === false && (
+                      <div className="text-[11px] bg-red-50 border border-red-200 rounded-lg p-2 mb-3 text-red-700">
+                        Citation check failed — the advisor cited policy passages that could not be verified.
+                        The auto-decision was downgraded and this request was sent to manual review.
+                      </div>
+                    )}
+
+                    {override && (
+                      <div className="text-[11px] bg-purple-50 border border-purple-200 rounded-lg p-3 mb-1">
+                        <p className="font-bold text-purple-800 mb-0.5">Reviewer override recorded</p>
+                        <p className="text-purple-700">
+                          {override.overridden_from} → {override.overridden_to}
+                          {override.reason ? `: ${override.reason}` : ""}
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Reviewer Decision */}
           <div className="bg-white border border-[#e5e7eb] rounded-xl p-5 shadow-sm">
             <h3 className="font-display font-bold text-[#0a0a0a] mb-4">Reviewer Decision</h3>
@@ -470,48 +657,79 @@ export default function PreAuthReviewPage() {
       </div>
 
       {/* Decision Modal */}
-      {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setModal(null); setReason(""); }} />
-          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4 animate-in fade-in zoom-in duration-200">
-            <button onClick={() => { setModal(null); setReason(""); }} className="absolute top-4 right-4 text-[#9ca3af] hover:text-[#0a0a0a]">
-              <X className="h-5 w-5" />
-            </button>
-            <h3 className={`font-display font-bold text-xl mb-2 ${modal === "approve" ? "text-[#16a34a]" : "text-red-600"}`}>
-              {modal === "approve" ? "Approve Pre-Authorisation" : "Deny Pre-Authorisation"}
-            </h3>
-            <p className="text-sm text-[#6b7280] mb-4">
-              You are about to {modal} request <span className="font-mono font-bold text-[#0a0a0a]">{request.reference_number}</span>.
-              {modal === "approve" && " This activates the authorisation on the reference above."}
-            </p>
+      {modal && (() => {
+        const aiStatus = request.ai_decision_status;
+        const aiTargetStatus = aiStatus === "auto_approved" ? "approved" : aiStatus === "auto_denied" ? "denied" : null;
+        const isOverridingAi = !!aiTargetStatus && aiTargetStatus !== (modal === "approve" ? "approved" : "denied");
+        const closeModal = () => { setModal(null); setReason(""); setOverrideReason(""); };
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeModal} />
+            <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4 animate-in fade-in zoom-in duration-200">
+              <button onClick={closeModal} className="absolute top-4 right-4 text-[#9ca3af] hover:text-[#0a0a0a]">
+                <X className="h-5 w-5" />
+              </button>
+              <h3 className={`font-display font-bold text-xl mb-2 ${modal === "approve" ? "text-[#16a34a]" : "text-red-600"}`}>
+                {modal === "approve" ? "Approve Pre-Authorisation" : "Deny Pre-Authorisation"}
+              </h3>
+              <p className="text-sm text-[#6b7280] mb-4">
+                You are about to {modal} request <span className="font-mono font-bold text-[#0a0a0a]">{request.reference_number}</span>.
+                {modal === "approve" && " This activates the authorisation on the reference above."}
+              </p>
 
-            <label className="block text-sm font-medium text-[#374151] mb-1.5">
-              Reasoning / Internal Notes {modal === "deny" && <span className="text-red-500">*</span>}
-            </label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={4}
-              placeholder="Enter clinical rationale..."
-              className="w-full px-3 py-2 border border-[#e5e7eb] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0A1628] resize-none"
-            />
+              {isOverridingAi && (
+                <div className="mb-4 bg-purple-50 border border-purple-200 rounded-lg p-3 text-xs">
+                  <p className="font-bold text-purple-800 mb-1">You are overriding the AI advisor.</p>
+                  <p className="text-purple-700 leading-relaxed">
+                    The advisor previously {aiTargetStatus === "approved" ? "auto-approved" : "auto-denied"} this request.
+                    Please explain why so the submitter knows the reason — they will be notified.
+                  </p>
+                </div>
+              )}
 
-            <div className="flex gap-3 mt-6">
-              <Button variant="outline" className="flex-1" onClick={() => { setModal(null); setReason(""); }}>
-                Cancel
-              </Button>
-              <Button
-                className={`flex-1 ${modal === "deny" ? "bg-red-600 hover:bg-red-700" : ""}`}
-                onClick={handleDecision}
-                loading={submitting}
-                disabled={modal === "deny" && !reason.trim()}
-              >
-                Confirm {modal === "approve" ? "Approval" : "Denial"}
-              </Button>
+              <label className="block text-sm font-medium text-[#374151] mb-1.5">
+                Reasoning / Internal Notes {modal === "deny" && <span className="text-red-500">*</span>}
+              </label>
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={4}
+                placeholder="Enter clinical rationale..."
+                className="w-full px-3 py-2 border border-[#e5e7eb] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0A1628] resize-none"
+              />
+
+              {isOverridingAi && (
+                <>
+                  <label className="block text-sm font-medium text-[#374151] mb-1.5 mt-4">
+                    Note to submitter <span className="text-[#9ca3af] font-normal">(optional)</span>
+                  </label>
+                  <textarea
+                    value={overrideReason}
+                    onChange={(e) => setOverrideReason(e.target.value)}
+                    rows={3}
+                    placeholder="Plain-English explanation the submitter will see…"
+                    className="w-full px-3 py-2 border border-[#e5e7eb] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0A1628] resize-none"
+                  />
+                </>
+              )}
+
+              <div className="flex gap-3 mt-6">
+                <Button variant="outline" className="flex-1" onClick={closeModal}>
+                  Cancel
+                </Button>
+                <Button
+                  className={`flex-1 ${modal === "deny" ? "bg-red-600 hover:bg-red-700" : ""}`}
+                  onClick={handleDecision}
+                  loading={submitting}
+                  disabled={modal === "deny" && !reason.trim()}
+                >
+                  Confirm {modal === "approve" ? "Approval" : "Denial"}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

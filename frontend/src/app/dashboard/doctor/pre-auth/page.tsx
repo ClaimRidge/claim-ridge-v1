@@ -10,8 +10,10 @@ import {
   ShieldCheck,
   AlertTriangle,
   CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
+import OfflinePacketPanel from "@/components/OfflinePacketPanel";
 
 interface PreAuthRow {
   id: string;
@@ -42,6 +44,7 @@ export default function DoctorPreAuthListPage() {
   const [rows, setRows] = useState<PreAuthRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("routed");
+  const [activePacket, setActivePacket] = useState<{ id: string; ref: string } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -174,6 +177,14 @@ export default function DoctorPreAuthListPage() {
                         >
                           {r.reference_number}
                         </button>
+                      ) : r.routing_status === "unrouted" ? (
+                        <button
+                          onClick={() => setActivePacket({ id: r.id, ref: r.reference_number })}
+                          title="View AI-prepared offline submission packet"
+                          className="inline-flex items-center gap-1 text-xs bg-[#f0fdfa] text-[#0f766e] border border-[#99f6e4] px-2 py-1 rounded hover:bg-[#00B4A6] hover:text-white transition-colors"
+                        >
+                          <Sparkles className="h-3 w-3" /> Offline packet
+                        </button>
                       ) : (
                         <span className="text-xs text-[#9ca3af]">—</span>
                       )}
@@ -188,6 +199,14 @@ export default function DoctorPreAuthListPage() {
           </div>
         )}
       </div>
+
+      {activePacket && (
+        <OfflinePacketPanel
+          preAuthId={activePacket.id}
+          referenceNumber={activePacket.ref}
+          onClose={() => setActivePacket(null)}
+        />
+      )}
     </div>
   );
 }
