@@ -382,13 +382,18 @@ async def list_my_pre_auths(current_user=Depends(get_current_user)):
     """Returns pre-auths this provider/doctor has submitted, with routing status."""
     res = (
         supabase.table("pre_auth_requests")
-        .select("id, reference_number, patient_name, provider_name, status, routing_status, insurer_id, payer_name_raw, valid_until, approved_procedures, created_at, sla_deadline")
+        .select("id, reference_number, patient_name, provider_name, status, routing_status, insurer_id, payer_name_raw, valid_until, approved_procedures, created_at, sla_deadline, review_notes, reviewed_at, ai_decision_status, ai_recommendation, ai_rationale")
         .eq("submitted_by", current_user.id)
         .order("created_at", desc=True)
         .limit(200)
         .execute()
     )
     rows = res.data or []
+    # ai_rationale carries the full cited-policy payload (and the offline packet
+    # for unrouted rows) — the submitter's list only needs the override notice.
+    for r in rows:
+        rationale = r.pop("ai_rationale", None)
+        r["override_notice"] = rationale.get("override_notice") if isinstance(rationale, dict) else None
     # Hydrate insurer names for routed rows
     insurer_ids = list({r["insurer_id"] for r in rows if r.get("insurer_id")})
     insurers = {}

@@ -202,8 +202,13 @@ async def review_pre_auth(id: str, payload: ReviewRequest, current_user = Depend
     )
 
     now_iso = datetime.now(timezone.utc).isoformat()
+    # The reviewer's reason feeds back to the submitter's pre-auth history page
+    # on EVERY manual decision — not only on AI overrides (migration 019).
     updates: dict = {
         "status": new_status,
+        "review_notes": (payload.reason or payload.override_reason or "").strip() or None,
+        "reviewed_by": str(current_user.id),
+        "reviewed_at": now_iso,
         "updated_at": now_iso,
     }
     if is_override:

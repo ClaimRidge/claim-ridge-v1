@@ -241,6 +241,11 @@ async def list_org_pre_auths(current_user=Depends(get_current_user)):
     # Per-doctor roll-up keyed by submitter.
     doctor_stats: dict = {}
     for r in rows:
+        # ai_rationale carries the full cited-policy payload (and the offline
+        # packet for unrouted rows) — the governance list only needs the
+        # override notice for the sender-facing decision detail.
+        rationale = r.pop("ai_rationale", None)
+        r["override_notice"] = rationale.get("override_notice") if isinstance(rationale, dict) else None
         sid = r.get("submitted_by")
         submitter = submitters.get(sid) if sid else None
         r["submitted_by_name"] = (submitter or {}).get("full_name") or "Unknown"

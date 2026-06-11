@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -10,12 +10,17 @@ import {
   ShieldCheck,
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Sparkles,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import OfflinePacketPanel from "@/components/OfflinePacketPanel";
+import PreAuthDecisionDetail, {
+  PreAuthDecisionFields,
+} from "@/components/PreAuthDecisionDetail";
 
-interface PreAuthRow {
+interface PreAuthRow extends PreAuthDecisionFields {
   id: string;
   reference_number: string;
   patient_name: string;
@@ -45,6 +50,7 @@ export default function DoctorPreAuthListPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("routed");
   const [activePacket, setActivePacket] = useState<{ id: string; ref: string } | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -153,11 +159,16 @@ export default function DoctorPreAuthListPage() {
                   <th className="px-6 py-3 text-xs font-medium text-[#9ca3af] uppercase">Status</th>
                   <th className="px-6 py-3 text-xs font-medium text-[#9ca3af] uppercase">Authorisation</th>
                   <th className="px-6 py-3 text-xs font-medium text-[#9ca3af] uppercase">Submitted</th>
+                  <th className="px-6 py-3 text-xs font-medium text-[#9ca3af] uppercase">Decision</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f3f4f6]">
                 {active.map((r) => (
-                  <tr key={r.id} className="hover:bg-[#f9fafb]">
+                  <Fragment key={r.id}>
+                  <tr
+                    className="hover:bg-[#f9fafb] cursor-pointer"
+                    onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                  >
                     <td className="px-6 py-4 text-sm font-mono text-[#0a0a0a]">{r.reference_number}</td>
                     <td className="px-6 py-4 text-sm text-[#0a0a0a]">{r.patient_name}</td>
                     <td className="px-6 py-4 text-sm text-[#6b7280]">
@@ -169,7 +180,10 @@ export default function DoctorPreAuthListPage() {
                     <td className="px-6 py-4 text-sm">
                       {r.status === "approved" ? (
                         <button
-                          onClick={() => navigator.clipboard.writeText(r.reference_number)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.clipboard.writeText(r.reference_number);
+                          }}
                           title={`Valid until ${
                             r.valid_until ? new Date(r.valid_until).toLocaleDateString() : "—"
                           }. Click to copy.`}
@@ -179,7 +193,10 @@ export default function DoctorPreAuthListPage() {
                         </button>
                       ) : r.routing_status === "unrouted" ? (
                         <button
-                          onClick={() => setActivePacket({ id: r.id, ref: r.reference_number })}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActivePacket({ id: r.id, ref: r.reference_number });
+                          }}
                           title="View AI-prepared offline submission packet"
                           className="inline-flex items-center gap-1 text-xs bg-[#f0fdfa] text-[#0f766e] border border-[#99f6e4] px-2 py-1 rounded hover:bg-[#00B4A6] hover:text-white transition-colors"
                         >
@@ -192,7 +209,25 @@ export default function DoctorPreAuthListPage() {
                     <td className="px-6 py-4 text-sm text-[#6b7280]">
                       {new Date(r.created_at).toLocaleDateString()}
                     </td>
+                    <td className="px-6 py-4 text-sm text-[#16a34a]">
+                      <span className="inline-flex items-center gap-1 text-xs font-bold">
+                        {expandedId === r.id ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
+                        Details
+                      </span>
+                    </td>
                   </tr>
+                  {expandedId === r.id && (
+                    <tr className="bg-[#f9fafb]">
+                      <td colSpan={7} className="px-6 py-4 border-t border-[#f3f4f6]">
+                        <PreAuthDecisionDetail row={r} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
