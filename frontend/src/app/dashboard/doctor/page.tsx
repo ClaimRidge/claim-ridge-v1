@@ -74,8 +74,8 @@ function StatusChip({ status, routing }: { status: string; routing?: string | nu
   }
   const s = (status || "").toLowerCase();
   const cls =
-    s === "approve" || s === "approved" ? "bg-green-50 text-green-700" :
-    s === "escalate" || s === "escalated" ? "bg-blue-50 text-blue-700" :
+    s === "approve" || s === "approved" || s === "accepted" ? "bg-green-50 text-green-700" :
+    s === "escalate" || s === "escalated" || s === "needs_info" ? "bg-blue-50 text-blue-700" :
     s === "deny" || s === "denied" || s === "rejected" ? "bg-red-50 text-red-700" :
     s === "submitted" || s === "pending" || s === "processing" ? "bg-amber-50 text-amber-700" :
     "bg-gray-100 text-gray-600";

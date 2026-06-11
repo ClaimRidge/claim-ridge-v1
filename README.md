@@ -39,6 +39,88 @@ ClaimRidge is an AI-powered insurance compliance platform that ensures medical c
 
 ---
 
+## 🚀 Running the Project
+
+The repo is a monorepo with two apps that run independently and meet over HTTP + a shared Supabase database:
+
+- `backend/` — FastAPI + Supabase + ML (port **8000**)
+- `frontend/` — Next.js 14 App Router (port **3000**)
+
+### Prerequisites
+
+- Python 3.10+ and Node.js 18+
+- A Supabase project (URL, service-role key, anon key)
+- LLM API keys: Groq, Gemini (and optionally OpenRouter)
+
+### 1. Database setup (first run only)
+
+The schema reference lives in `backend/database.sql` (context only — not a migration). On a fresh Supabase project, run the SQL files in `backend/migrations/` in **numeric order** via the Supabase SQL editor.
+
+### 2. Environment variables
+
+**`backend/.env`:**
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<service-role key — never the anon key>
+
+GROQ_API_KEY=<key>
+GEMINI_API_KEY=<key>
+OPENROUTER_API_KEY=<key>               # optional (OCR via OpenRouter)
+
+LLM_MODEL=llama-3.3-70b-versatile      # optional, default shown
+OCR_MODEL=baidu/qianfan-ocr-fast:free  # optional, default shown
+```
+
+**`frontend/.env.local`:**
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+```
+
+### 3. Launch the backend
+
+From the repo root (PowerShell):
+
+```powershell
+# Create + activate a virtual environment (first run only)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+cd backend
+pip install -r requirements.txt   # first run only
+
+# Start the API on http://localhost:8000
+uvicorn main:app --reload
+```
+
+> ⚠️ Always start uvicorn with `backend/` as the working directory — the fraud-model files in `backend/models/` resolve relative to the CWD and silently fail to load otherwise.
+
+### 4. Launch the frontend
+
+In a second terminal:
+
+```powershell
+cd frontend
+npm install        # first run only
+npm run dev        # dev server on http://localhost:3000
+```
+
+Other scripts: `npm run build`, `npm run start` (production), `npm run lint`.
+
+### 5. Open the app
+
+- Frontend: <http://localhost:3000>
+- Backend API docs (Swagger): <http://localhost:8000/docs>
+
+Doctors sign up directly and join an organisation by org code; provider/insurer organisations apply via the signup form and wait for admin approval before their account is created.
+
+There is currently no test suite in either app. See `CLAUDE.md` for the full architecture walkthrough.
+
+---
+
 ## 🚦 Development Guidelines
 
 ### Code Style

@@ -87,7 +87,34 @@ export interface ClaimData {
   generatedAt: string;
 }
 
-export type ClaimStatus = "draft" | "submitted" | "pending" | "approved" | "denied" | "appealing";
+// Two decision vocabularies coexist on claims.status:
+// AI adjudication writes accepted | denied | escalated; a human Medical
+// Officer's manual review writes approved | rejected | needs_info.
+export type ClaimStatus =
+  | "draft"
+  | "intake_complete"
+  | "submitted"
+  | "unrouted"
+  | "pending"
+  | "under_review"
+  | "approved"
+  | "accepted"
+  | "denied"
+  | "rejected"
+  | "escalated"
+  | "needs_info"
+  | "appealing";
+
+export interface AdjudicationVerdict {
+  decision: "accept" | "deny" | "escalate";
+  status: string;
+  path: string;
+  rationale: string;
+  evidence?: { step: string; finding: string }[];
+  policy_basis?: string[];
+  adjudicated_by?: string;
+  adjudicated_at?: string;
+}
 
 export interface Claim {
   id: string;
@@ -110,9 +137,13 @@ export interface Claim {
   currency?: string;
   notes: string;
   status: ClaimStatus;
+  routing_status?: "routed" | "unrouted";
   scrub_result: ScrubResult | null;
   scrub_passed?: boolean;
   scrub_warnings?: number;
+  adjudication?: AdjudicationVerdict | null;
+  adjudication_decision?: "accept" | "deny" | "escalate" | null;
+  adjudicated_at?: string | null;
   reviewed_by?: string;
   reviewed_at?: string;
   review_notes?: string;

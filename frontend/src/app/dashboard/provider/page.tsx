@@ -75,9 +75,12 @@ const STATUS_CONFIG: Record<string, { label: string; class: string; icon: React.
   pending: { label: "Pending", class: "bg-amber-50 text-amber-600 border-amber-200", icon: Clock },
   under_review: { label: "Under Review", class: "bg-amber-50 text-amber-600 border-amber-200", icon: Clock },
   needs_info: { label: "Clarification", class: "bg-amber-50 text-amber-600 border-amber-200", icon: Clock },
+  escalated: { label: "Under Review", class: "bg-amber-50 text-amber-600 border-amber-200", icon: Clock },
   approved: { label: "Approved", class: "bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0]", icon: CheckCircle },
+  accepted: { label: "Accepted", class: "bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0]", icon: CheckCircle },
   denied: { label: "Denied", class: "bg-red-50 text-red-600 border-red-200", icon: XCircle },
   rejected: { label: "Rejected", class: "bg-red-50 text-red-600 border-red-200", icon: XCircle },
+  unrouted: { label: "Out of Network", class: "bg-[#f9fafb] text-[#6b7280] border-[#e5e7eb]", icon: Send },
   appealing: { label: "Appealing", class: "bg-orange-50 text-orange-600 border-orange-200", icon: Gavel },
 };
 
@@ -244,9 +247,9 @@ export default function DashboardPage() {
   // FIX 2: Group backend statuses into the visual UI tabs
   const checkTabMatch = (claimStatus: string, tab: string) => {
     if (tab === "all") return true;
-    if (tab === "submitted") return ["submitted", "intake_complete"].includes(claimStatus);
-    if (tab === "pending") return ["pending", "under_review", "needs_info"].includes(claimStatus);
-    if (tab === "approved") return claimStatus === "approved";
+    if (tab === "submitted") return ["submitted", "intake_complete", "unrouted"].includes(claimStatus);
+    if (tab === "pending") return ["pending", "under_review", "needs_info", "escalated"].includes(claimStatus);
+    if (tab === "approved") return ["approved", "accepted"].includes(claimStatus);
     if (tab === "denied") return ["denied", "rejected"].includes(claimStatus);
     if (tab === "appealing") return claimStatus === "appealing";
     return false;
@@ -257,8 +260,8 @@ export default function DashboardPage() {
   // FIX 3: Update stat math to include "rejected" as denied
   const totalClaims = claims.length;
   const totalBilled = claims.reduce((sum, c) => sum + (c.billed_amount || 0), 0);
-  const approvedClaims = claims.filter((c) => c.status === "approved").length;
-  const decidedClaims = claims.filter((c) => ["approved", "denied", "rejected"].includes(c.status)).length;
+  const approvedClaims = claims.filter((c) => ["approved", "accepted"].includes(c.status)).length;
+  const decidedClaims = claims.filter((c) => ["approved", "accepted", "denied", "rejected"].includes(c.status)).length;
   const approvalRate = decidedClaims > 0 ? Math.round((approvedClaims / decidedClaims) * 100) : 0;
   const deniedAmount = claims
     .filter((c) => ["denied", "rejected"].includes(c.status))

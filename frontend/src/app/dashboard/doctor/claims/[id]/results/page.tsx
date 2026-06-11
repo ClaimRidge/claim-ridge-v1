@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { logPiiAccess } from "@/lib/audit";
 import { Claim, ScrubIssue } from "@/types/claim";
 import Button from "@/components/ui/Button";
+import PayerDecisionPanel from "@/components/PayerDecisionPanel";
 import { generateClaimPdf } from "@/lib/pdf/claimPdf";
 import { generateCorrectedClaimPdf } from "@/lib/pdf/correctedClaimPdf";
 import { generatePayerClaimPdf } from "@/lib/pdf/payerClaimPdf";
@@ -357,6 +358,9 @@ export default function ResultsPage() {
       <div className="mb-8">
         <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-[#0a0a0a]">Scrub Results</h1>
       </div>
+
+      {/* Payer Decision — the payer's answer reported back to the sender */}
+      <PayerDecisionPanel claim={claim} />
 
       {/* Summary Card */}
       <div className="bg-white border border-[#e5e7eb] rounded-xl shadow-sm p-6 md:p-8 mb-6">

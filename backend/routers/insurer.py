@@ -216,12 +216,16 @@ async def review_claim(payload: ReviewClaimRequest, current_user = Depends(get_c
     if not insurer_id:
         raise HTTPException(status_code=403, detail="Insurer staff profile has no linked insurer.")
 
+    # The decision feeds back to the sender's portal (claim history/results),
+    # so it lives on dedicated review columns — never on the submitter's `notes`.
     update_data = {
         "status": payload.action,
+        "reviewed_by": current_user.id,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if payload.reason:
-        update_data["notes"] = payload.reason
+        update_data["review_notes"] = payload.reason
 
     update_res = (
         supabase.table("claims")

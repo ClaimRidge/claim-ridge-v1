@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { ClaimAuditLog } from "@/types/claim";
+import { PayerDecisionBadge } from "@/components/PayerDecisionPanel";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import {
@@ -45,7 +46,9 @@ function StatusBadge({ status }: { status: "clean" | "warnings" | "errors" }) {
 
 export default function ClaimsHistoryPage() {
   const [logs, setLogs] = useState<ClaimAuditLog[]>([]);
-  const [refToClaimId, setRefToClaimId] = useState<Record<string, string>>({});
+  const [refToClaim, setRefToClaim] = useState<
+    Record<string, { id: string; status: string | null; routing_status: string | null }>
+  >({});
   const [loading, setLoading] = useState(true);
 
   const [query, setQuery] = useState("");
@@ -63,7 +66,7 @@ export default function ClaimsHistoryPage() {
           .from("claims_audit")
           .select("*")
           .order("created_at", { ascending: false }),
-        supabase.from("claims").select("id"),
+        supabase.from("claims").select("id, status, routing_status"),
       ]);
 
       if (auditRes.error) {
@@ -78,12 +81,12 @@ export default function ClaimsHistoryPage() {
       }
 
       if (claimsRes.data) {
-        const map: Record<string, string> = {};
-        for (const c of claimsRes.data as { id: string }[]) {
+        const map: Record<string, { id: string; status: string | null; routing_status: string | null }> = {};
+        for (const c of claimsRes.data as { id: string; status: string | null; routing_status: string | null }[]) {
           const ref = `CR-${c.id.slice(0, 8).toUpperCase()}`;
-          map[ref] = c.id;
+          map[ref] = c;
         }
-        setRefToClaimId(map);
+        setRefToClaim(map);
       }
 
       setLoading(false);
@@ -198,7 +201,7 @@ export default function ClaimsHistoryPage() {
             onChange={(v) => setStatus(v as StatusFilter)}
             size="sm"
             options={[
-              { value: "all", label: "All statuses" },
+              { value: "all", label: "All scrub results" },
               { value: "clean", label: "Clean" },
               { value: "warnings", label: "Warnings" },
               { value: "errors", label: "Errors" },
@@ -262,8 +265,8 @@ export default function ClaimsHistoryPage() {
                   <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Payer</th>
                   <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Amount</th>
                   <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Flags</th>
-                  <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Status</th>
-
+                  <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Scrub Result</th>
+                  <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Payer Decision</th>
                   <th className="px-4 py-3 text-xs font-medium text-[#9ca3af] uppercase tracking-wider">Scrubbed</th>
                   <th className="px-4 py-3" />
                 </tr>
@@ -272,7 +275,8 @@ export default function ClaimsHistoryPage() {
                 {filtered.map((log) => {
                   const flagCount = Array.isArray(log.ai_flags) ? log.ai_flags.length : 0;
                   const derived = deriveStatus(log.ai_flags);
-                  const claimId = refToClaimId[log.claim_reference_number];
+                  const claim = refToClaim[log.claim_reference_number];
+                  const claimId = claim?.id;
                   return (
                     <tr
                       key={log.id}
@@ -322,7 +326,13 @@ export default function ClaimsHistoryPage() {
                       <td className="px-4 py-3">
                         <StatusBadge status={derived} />
                       </td>
-
+                      <td className="px-4 py-3">
+                        {claim ? (
+                          <PayerDecisionBadge status={claim.status} routingStatus={claim.routing_status} />
+                        ) : (
+                          <span className="text-[#9ca3af] text-xs">{"—"}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-xs text-[#9ca3af] whitespace-nowrap">
                         {new Date(log.created_at).toLocaleDateString("en-GB", {
                           day: "2-digit",
