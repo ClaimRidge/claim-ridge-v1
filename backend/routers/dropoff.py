@@ -403,3 +403,72 @@ async def list_my_pre_auths(current_user=Depends(get_current_user)):
     for r in rows:
         r["insurer_name"] = insurers.get(r.get("insurer_id")) if r.get("insurer_id") else r.get("payer_name_raw")
     return rows
+
+
+@router.get("/submission/{id}")
+async def get_my_pre_auth_detail(id: str, current_user=Depends(get_current_user)):
+    """Full submitted pre-auth packet + its documents, for the sender side.
+
+    The insurer-facing `GET /api/pre-auth/{id}` is scoped to the insurer; this
+    is its mirror for the people who *sent* the request: the submitter
+    themselves, or any provider admin in the submitter's organisation. Lets the
+    provider/doctor history pages show the exact request that was filed."""
+    req_res = (
+        supabase.table("pre_auth_requests")
+        .select("*")
+        .eq("id", id)
+        .maybe_single()
+        .execute()
+    )
+    if not req_res or not getattr(req_res, "data", None):
+        raise HTTPException(status_code=404, detail="Pre-authorisation request not found.")
+    row = req_res.data
+
+    # Authorisation: submitter, or a provider admin in the same submitter_org.
+    profile_res = (
+        supabase.table("profiles")
+        .select("provider_org_id, account_type")
+        .eq("id", current_user.id)
+        .maybe_single()
+        .execute()
+    )
+    profile = (profile_res.data if profile_res else None) or {}
+    is_submitter = row.get("submitted_by") and str(row["submitted_by"]) == str(current_user.id)
+    same_org = (
+        row.get("submitter_org")
+        and profile.get("provider_org_id")
+        and str(profile["provider_org_id"]) == str(row["submitter_org"])
+    )
+    if not (is_submitter or same_org):
+        raise HTTPException(status_code=403, detail="Not authorised to view this submission.")
+
+    # ai_rationale carries the full policy payload; the sender view only needs
+    # the override notice (same shaping the list endpoints apply).
+    rationale = row.pop("ai_rationale", None)
+    row["override_notice"] = rationale.get("override_notice") if isinstance(rationale, dict) else None
+
+    if row.get("insurer_id"):
+        ires = supabase.table("insurers").select("name").eq("id", row["insurer_id"]).maybe_single().execute()
+        row["insurer_name"] = (ires.data or {}).get("name") if ires and ires.data else None
+    else:
+        row["insurer_name"] = row.get("payer_name_raw")
+
+    try:
+        docs_res = (
+            supabase.table("pre_auth_documents")
+            .select("id, file_name, file_type, file_base64")
+            .eq("pre_auth_id", id)
+            .execute()
+        )
+        documents = docs_res.data or []
+    except Exception:
+        # Tolerate environments where file_base64 hasn't been added yet.
+        docs_res = (
+            supabase.table("pre_auth_documents")
+            .select("id, file_name, file_type")
+            .eq("pre_auth_id", id)
+            .execute()
+        )
+        documents = docs_res.data or []
+
+    return {"request": row, "documents": documents}

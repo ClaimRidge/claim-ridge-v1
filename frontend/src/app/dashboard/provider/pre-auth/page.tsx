@@ -1,8 +1,8 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   ArrowLeft,
@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   AlertTriangle,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Users,
   Stethoscope,
@@ -18,9 +17,7 @@ import {
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import OfflinePacketPanel from "@/components/OfflinePacketPanel";
-import PreAuthDecisionDetail, {
-  PreAuthDecisionFields,
-} from "@/components/PreAuthDecisionDetail";
+import { PreAuthDecisionFields } from "@/components/PreAuthDecisionDetail";
 import { Sparkles } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────
@@ -61,6 +58,7 @@ const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 export default function ProviderPreAuthGovernancePage() {
   const supabase = createClient();
+  const router = useRouter();
   const params = useSearchParams();
   const submitted = params.get("submitted");
   const routing = params.get("routing");
@@ -71,7 +69,6 @@ export default function ProviderPreAuthGovernancePage() {
   const [tab, setTab] = useState<Tab>("routed");
   const [doctorFilter, setDoctorFilter] = useState<string>("all"); // "all" | doctor_id
   const [activePacket, setActivePacket] = useState<{ id: string; ref: string } | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -329,10 +326,10 @@ export default function ProviderPreAuthGovernancePage() {
               </thead>
               <tbody className="divide-y divide-[#f3f4f6]">
                 {filtered.map((r) => (
-                  <Fragment key={r.id}>
                   <tr
+                    key={r.id}
                     className="hover:bg-[#f9fafb] cursor-pointer"
-                    onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                    onClick={() => router.push(`/dashboard/provider/pre-auth/${r.id}`)}
                   >
                     <td className="px-6 py-4 text-sm font-mono text-[#0a0a0a]">{r.reference_number}</td>
                     <td className="px-6 py-4 text-sm text-[#0a0a0a]">
@@ -384,23 +381,10 @@ export default function ProviderPreAuthGovernancePage() {
                     </td>
                     <td className="px-6 py-4 text-sm text-[#16a34a]">
                       <span className="inline-flex items-center gap-1 text-xs font-bold">
-                        {expandedId === r.id ? (
-                          <ChevronDown className="h-4 w-4" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4" />
-                        )}
-                        Details
+                        View details <ChevronRight className="h-4 w-4" />
                       </span>
                     </td>
                   </tr>
-                  {expandedId === r.id && (
-                    <tr className="bg-[#f9fafb]">
-                      <td colSpan={8} className="px-6 py-4 border-t border-[#f3f4f6]">
-                        <PreAuthDecisionDetail row={r} />
-                      </td>
-                    </tr>
-                  )}
-                  </Fragment>
                 ))}
               </tbody>
             </table>

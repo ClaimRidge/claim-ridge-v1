@@ -29,8 +29,12 @@ class PreAuthAutomationConfig(BaseModel):
                   row; reviewer still decides every request.
       auto_both — AI may auto-approve AND auto-deny when confidence >=
                   threshold AND all citations verify. Other requests escalate.
+
+    Default mode is `auto_both` (matches the claims adjudication flow — AI
+    decides automatically and escalates to a human when it can't). Insurers can
+    dial it back to advisory/shadow/off on the automation settings page.
     """
-    mode: str = Field("off")
+    mode: str = Field("auto_both")
     confidence_threshold: float = Field(0.90, ge=0.0, le=1.0)
     auto_decision_max_amount: float = Field(5000.0, ge=0.0)
     always_review_specialties: List[str] = []

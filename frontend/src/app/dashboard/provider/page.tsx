@@ -259,13 +259,13 @@ export default function DashboardPage() {
 
   // FIX 3: Update stat math to include "rejected" as denied
   const totalClaims = claims.length;
-  const totalBilled = claims.reduce((sum, c) => sum + (c.billed_amount || 0), 0);
+  const totalBilled = claims.reduce((sum, c) => sum + (Number(c.total_billed ?? c.billed_amount) || 0), 0);
   const approvedClaims = claims.filter((c) => ["approved", "accepted"].includes(c.status)).length;
   const decidedClaims = claims.filter((c) => ["approved", "accepted", "denied", "rejected"].includes(c.status)).length;
   const approvalRate = decidedClaims > 0 ? Math.round((approvedClaims / decidedClaims) * 100) : 0;
   const deniedAmount = claims
     .filter((c) => ["denied", "rejected"].includes(c.status))
-    .reduce((sum, c) => sum + (c.billed_amount || 0), 0);
+    .reduce((sum, c) => sum + (Number(c.total_billed ?? c.billed_amount) || 0), 0);
 
   // ─── Pre-authorisation analytics ───
   const paBuckets = preAuths.reduce(
@@ -422,7 +422,11 @@ export default function DashboardPage() {
               </thead>
               <tbody className="divide-y divide-[#f3f4f6]">
                 {filteredClaims.map((claim) => (
-                  <tr key={claim.id} className="hover:bg-[#f9fafb] transition-colors">
+                  <tr
+                    key={claim.id}
+                    onClick={() => router.push(`/dashboard/provider/claims/${claim.id}/results`)}
+                    className="hover:bg-[#f9fafb] transition-colors cursor-pointer"
+                  >
                     <td className="px-6 py-4">
                       <span className="text-sm font-mono text-[#0a0a0a] font-medium">
                         {claim.claim_number || `CR-${claim.id.slice(0, 10)}`}
@@ -432,7 +436,7 @@ export default function DashboardPage() {
                     <td className="px-6 py-4 text-sm text-[#6b7280]">{claim.payer_name}</td>
                     <td className="px-6 py-4 text-sm text-[#6b7280]">{formatDateDMY(claim.date_of_service)}</td>
                     <td className="px-6 py-4 text-sm font-medium text-[#0a0a0a]">
-                      {Number(claim.billed_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} JOD
+                      {(Number(claim.total_billed ?? claim.billed_amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} JOD
                     </td>
                     <td className="px-6 py-4">
                       <ScrubBadge passed={claim.scrub_passed} />
@@ -441,16 +445,18 @@ export default function DashboardPage() {
                       <ClaimStatusBadge status={claim.status} />
                     </td>
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
+                      {/* One action per line, stacked within the cell. */}
+                      <div className="flex flex-col items-start gap-1.5">
                         <Link
                           href={`/dashboard/provider/claims/${claim.id}/results`}
+                          onClick={(e) => e.stopPropagation()}
                           className="inline-flex items-center gap-1 text-sm text-[#16a34a] hover:text-[#15803d] font-semibold"
                         >
                           <Eye className="h-3.5 w-3.5" />
                           View
                         </Link>
                         <button
-                          onClick={() => handleDownloadPdf(claim)}
+                          onClick={(e) => { e.stopPropagation(); handleDownloadPdf(claim); }}
                           disabled={downloadingId === claim.id}
                           className="inline-flex items-center gap-1 text-sm text-[#6b7280] hover:text-[#374151] font-medium disabled:opacity-50"
                         >
@@ -459,7 +465,10 @@ export default function DashboardPage() {
                         </button>
                         {/* FIX 4: Add rejected to the condition that shows the Appeal button */}
                         {["denied", "rejected"].includes(claim.status) && (
-                          <span className="inline-flex items-center gap-1 text-sm text-orange-600 font-semibold cursor-pointer hover:text-orange-700">
+                          <span
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-sm text-orange-600 font-semibold cursor-pointer hover:text-orange-700"
+                          >
                             <Gavel className="h-3.5 w-3.5" />
                             Appeal
                           </span>
@@ -574,7 +583,11 @@ export default function DashboardPage() {
                   </thead>
                   <tbody className="divide-y divide-[#f3f4f6]">
                     {recentPreAuths.map((p) => (
-                      <tr key={p.id} className="hover:bg-[#f9fafb] transition-colors">
+                      <tr
+                        key={p.id}
+                        onClick={() => router.push(`/dashboard/provider/pre-auth/${p.id}`)}
+                        className="hover:bg-[#f9fafb] transition-colors cursor-pointer"
+                      >
                         <td className="px-6 py-4 text-sm font-mono text-[#0a0a0a] font-medium">
                           {p.reference_number}
                         </td>

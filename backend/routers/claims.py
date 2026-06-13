@@ -4,7 +4,7 @@ import datetime
 import time
 import random
 import string
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from core.security import get_current_user
@@ -12,9 +12,23 @@ from core.database import supabase
 
 from services.ai_services import extract_claim_from_document, extract_claim_from_documents, scrub_claim
 from services.authorization import verify_authorization
+from services.adjudication import adjudicate_claim
 from services import audit
 
 logger = logging.getLogger(__name__)
+
+
+async def _auto_adjudicate(claim_id: str, insurer_id: str) -> None:
+    """Run AI adjudication automatically as soon as a routed claim lands in the
+    insurer's database — no manual insurer click required. The verdict
+    (accepted | denied | escalated) is persisted on the claim row, so the
+    submitter sees the answer as soon as it finishes. Failures are swallowed:
+    the claim simply stays `submitted` and the insurer's first-open path will
+    adjudicate it later. Runs as a background task (actor_id=None → system)."""
+    try:
+        await adjudicate_claim(claim_id=claim_id, insurer_id=insurer_id, actor_id=None)
+    except Exception as e:
+        logger.error(f"Auto-adjudication failed for claim {claim_id}: {e}")
 
 # --- Pydantic Models ---
 class ExtractDocument(BaseModel):
@@ -259,6 +273,7 @@ async def preview_claim_endpoint(
 @router.post("/submit")
 async def submit_claim_endpoint(
     claim_data: ClaimFormData,
+    background_tasks: BackgroundTasks,
     current_user=Depends(get_current_user),
 ):
     """COMMIT step. Persists the claim, routes it to the insurer, and writes the
@@ -313,6 +328,14 @@ async def submit_claim_endpoint(
     if not insert_res.data:
         raise HTTPException(status_code=500, detail="Failed to save claim to database")
     db_generated_id = insert_res.data[0]["id"]
+
+    # Kick off AI adjudication automatically the moment a routed claim arrives —
+    # the insurer no longer has to open it to start the analysis. The verdict
+    # (accepted | denied | escalated) lands on the claim row and is pushed back
+    # to the submitter via the realtime/notification layer. Out-of-network
+    # (unrouted) claims have no insurer/policy, so they're skipped.
+    if routing_status == "routed" and resolved_payer_id:
+        background_tasks.add_task(_auto_adjudicate, db_generated_id, resolved_payer_id)
 
     # Audit trail
     try:

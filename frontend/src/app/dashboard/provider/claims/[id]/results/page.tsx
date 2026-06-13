@@ -8,6 +8,7 @@ import { logPiiAccess } from "@/lib/audit";
 import { Claim, ScrubIssue } from "@/types/claim";
 import Button from "@/components/ui/Button";
 import PayerDecisionPanel from "@/components/PayerDecisionPanel";
+import ClaimRequestDetail from "@/components/ClaimRequestDetail";
 import { generateClaimPdf } from "@/lib/pdf/claimPdf";
 import { generateCorrectedClaimPdf } from "@/lib/pdf/correctedClaimPdf";
 import { generatePayerClaimPdf } from "@/lib/pdf/payerClaimPdf";
@@ -300,6 +301,23 @@ export default function ResultsPage() {
     fetchClaim();
   }, [params.id]);
 
+  // Live-update when AI adjudication finishes in the background — the verdict
+  // (accepted | denied | escalated) arrives over Supabase Realtime, so the
+  // payer-decision panel fills in without a manual refresh.
+  useEffect(() => {
+    const claimId = params?.id as string;
+    if (!claimId) return;
+    const channel = supabase
+      .channel(`claim-${claimId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "claims", filter: `id=eq.${claimId}` },
+        (payload) => setClaim((prev) => ({ ...(prev as Claim), ...(payload.new as Claim) })),
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [params.id, supabase]);
+
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-12 text-center">
@@ -363,6 +381,11 @@ export default function ResultsPage() {
       {/* Payer Decision — the payer's answer reported back to the sender */}
       <PayerDecisionPanel claim={claim} />
 
+      {/* The exact claim packet that was submitted */}
+      <div className="mb-6">
+        <ClaimRequestDetail claim={claim} />
+      </div>
+
       {/* Summary Card */}
       <div className="bg-white border border-[#e5e7eb] rounded-xl shadow-sm p-6 md:p-8 mb-6">
         <div className="flex flex-col md:flex-row items-center gap-8">
@@ -384,7 +407,7 @@ export default function ResultsPage() {
               {claim.patient_name} — {claim.date_of_service}
             </h2>
             <p className="text-[#6b7280] text-xs sm:text-sm break-words">
-              {claim.provider_name} &middot; {claim.payer_name} &middot; {claim.billed_amount} JOD
+              {claim.provider_name} &middot; {claim.payer_name} &middot; {Number(claim.total_billed ?? claim.billed_amount) || 0} JOD
             </p>
             <div className="flex items-center gap-4 mt-4 justify-center md:justify-start flex-wrap">
               {errorCount > 0 && (

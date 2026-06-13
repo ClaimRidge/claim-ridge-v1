@@ -51,8 +51,13 @@ from langchain_core.messages import HumanMessage, SystemMessage
 logger = logging.getLogger(__name__)
 
 # Defaults applied when an insurer has no automation config saved yet.
+# Default is `auto_both`: the advisor auto-approves / auto-denies whenever the
+# guardrails pass (confidence >= threshold, all citations verify, under the cost
+# ceiling, no always-review/hard-block CPT, all required fields + documents
+# present) and escalates everything else to a human. Insurers can dial it back
+# to advisory/shadow/off via the automation settings page.
 _DEFAULTS = {
-    "mode": "off",
+    "mode": "auto_both",
     "confidence_threshold": 0.90,
     "auto_decision_max_amount": 5000.0,
     "always_review_specialties": [],
@@ -88,7 +93,7 @@ def load_automation_config(insurer_id: str) -> dict:
         cfg = {}
     merged = {**_DEFAULTS, **{k: v for k, v in cfg.items() if v is not None}}
     if merged["mode"] not in _VALID_MODES:
-        merged["mode"] = "off"
+        merged["mode"] = _DEFAULTS["mode"]
     return merged
 
 

@@ -1,8 +1,8 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   ArrowLeft,
@@ -10,15 +10,12 @@ import {
   ShieldCheck,
   AlertTriangle,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Sparkles,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import OfflinePacketPanel from "@/components/OfflinePacketPanel";
-import PreAuthDecisionDetail, {
-  PreAuthDecisionFields,
-} from "@/components/PreAuthDecisionDetail";
+import { PreAuthDecisionFields } from "@/components/PreAuthDecisionDetail";
 
 interface PreAuthRow extends PreAuthDecisionFields {
   id: string;
@@ -42,6 +39,7 @@ const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 export default function DoctorPreAuthListPage() {
   const supabase = createClient();
+  const router = useRouter();
   const params = useSearchParams();
   const submitted = params.get("submitted");
   const routing = params.get("routing");
@@ -50,7 +48,6 @@ export default function DoctorPreAuthListPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("routed");
   const [activePacket, setActivePacket] = useState<{ id: string; ref: string } | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -164,10 +161,10 @@ export default function DoctorPreAuthListPage() {
               </thead>
               <tbody className="divide-y divide-[#f3f4f6]">
                 {active.map((r) => (
-                  <Fragment key={r.id}>
                   <tr
+                    key={r.id}
                     className="hover:bg-[#f9fafb] cursor-pointer"
-                    onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                    onClick={() => router.push(`/dashboard/doctor/pre-auth/${r.id}`)}
                   >
                     <td className="px-6 py-4 text-sm font-mono text-[#0a0a0a]">{r.reference_number}</td>
                     <td className="px-6 py-4 text-sm text-[#0a0a0a]">{r.patient_name}</td>
@@ -211,23 +208,10 @@ export default function DoctorPreAuthListPage() {
                     </td>
                     <td className="px-6 py-4 text-sm text-[#16a34a]">
                       <span className="inline-flex items-center gap-1 text-xs font-bold">
-                        {expandedId === r.id ? (
-                          <ChevronDown className="h-4 w-4" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4" />
-                        )}
-                        Details
+                        View details <ChevronRight className="h-4 w-4" />
                       </span>
                     </td>
                   </tr>
-                  {expandedId === r.id && (
-                    <tr className="bg-[#f9fafb]">
-                      <td colSpan={7} className="px-6 py-4 border-t border-[#f3f4f6]">
-                        <PreAuthDecisionDetail row={r} />
-                      </td>
-                    </tr>
-                  )}
-                  </Fragment>
                 ))}
               </tbody>
             </table>

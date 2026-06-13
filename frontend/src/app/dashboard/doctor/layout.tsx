@@ -6,6 +6,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { User } from "@supabase/supabase-js";
 import ClaimRidgeLogo from "@/components/ClaimRidgeLogo";
+import NotificationBell from "@/components/NotificationBell";
+import { useDecisionNotifications } from "@/hooks/useDecisionNotifications";
 import {
   LayoutDashboard,
   FilePlus,
@@ -63,9 +65,9 @@ const NAV_GROUPS: { label: string; items: NavItemDef[] }[] = [
 ];
 
 function NavItem({
-  href, label, icon: Icon, exact, pathname, onClick,
+  href, label, icon: Icon, exact, pathname, onClick, badge = 0,
 }: {
-  href: string; label: string; icon: React.ElementType; exact?: boolean; pathname: string; onClick?: () => void;
+  href: string; label: string; icon: React.ElementType; exact?: boolean; pathname: string; onClick?: () => void; badge?: number;
 }) {
   const isActive = exact ? pathname === href : pathname === href || pathname.startsWith(href + "/");
   return (
@@ -84,10 +86,19 @@ function NavItem({
         <Icon className="h-4 w-4 flex-shrink-0" />
       </div>
       <span className="flex-1 truncate">{label}</span>
-      {isActive && <ChevronRight className="h-3 w-3 text-white/40" />}
+      {badge > 0 && (
+        <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
+      {isActive && badge === 0 && <ChevronRight className="h-3 w-3 text-white/40" />}
     </Link>
   );
 }
+
+// Sidebar items that should display the unread payer-decision count.
+const PREAUTH_HISTORY_HREF = "/dashboard/doctor/pre-auth";
+const CLAIM_HISTORY_HREF = "/dashboard/doctor/claims/history";
 
 export default function DoctorLayout({ children }: { children: React.ReactNode }) {
   const [, setUser] = useState<User | null>(null);
@@ -98,6 +109,23 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
   const router = useRouter();
   const pathname = usePathname();
   const supabase = createClient();
+  const notifications = useDecisionNotifications("doctor");
+
+  // Per-item unread badge for the two history nav items.
+  const badgeFor = (href: string) =>
+    href === PREAUTH_HISTORY_HREF ? notifications.preAuthUnseen.length
+    : href === CLAIM_HISTORY_HREF ? notifications.claimUnseen.length
+    : 0;
+
+  // Opening a history page acknowledges that category's decisions.
+  const paUnseen = notifications.preAuthUnseen.length;
+  const clUnseen = notifications.claimUnseen.length;
+  useEffect(() => {
+    if (paUnseen > 0 && pathname === PREAUTH_HISTORY_HREF) notifications.markSeen("preauth");
+  }, [pathname, paUnseen, notifications]);
+  useEffect(() => {
+    if (clUnseen > 0 && pathname.startsWith(CLAIM_HISTORY_HREF)) notifications.markSeen("claim");
+  }, [pathname, clUnseen, notifications]);
 
   useEffect(() => {
     (async () => {
@@ -159,10 +187,11 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
     <div className="h-screen bg-[#f4f6f9] flex overflow-hidden font-inter">
       {/* ─── Desktop Sidebar ─────────────────────────────── */}
       <aside className="hidden lg:flex lg:flex-col lg:w-60 xl:w-64 flex-shrink-0 bg-[#0A1628] border-r border-white/5 h-full">
-        <div className="h-20 flex items-center px-6 border-b border-white/5">
+        <div className="h-20 flex items-center justify-between px-6 border-b border-white/5">
           <Link href="/dashboard/doctor" className="hover:opacity-80 transition-opacity">
             <ClaimRidgeLogo size={28} variant="dark" />
           </Link>
+          <NotificationBell notifications={notifications} portal="doctor" />
         </div>
 
         <div className="flex-1 flex flex-col justify-between py-6 px-3 min-h-0">
@@ -174,7 +203,7 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
                 </p>
                 <div className="space-y-0.5">
                   {group.items.map((item) => (
-                    <NavItem key={item.href} {...item} pathname={pathname} />
+                    <NavItem key={item.href} {...item} pathname={pathname} badge={badgeFor(item.href)} />
                   ))}
                 </div>
               </div>
@@ -210,9 +239,12 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
         <Link href="/dashboard/doctor">
           <ClaimRidgeLogo size={22} variant="dark" />
         </Link>
-        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1.5 text-white/70 hover:text-white">
-          {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
+        <div className="flex items-center gap-1">
+          <NotificationBell notifications={notifications} portal="doctor" />
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1.5 text-white/70 hover:text-white">
+            {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </div>
 
       {/* ─── Mobile Drawer ───────────────────────────────── */}
@@ -228,7 +260,7 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
                   </p>
                   <div className="space-y-0.5">
                     {group.items.map((item) => (
-                      <NavItem key={item.href} {...item} pathname={pathname} onClick={() => setSidebarOpen(false)} />
+                      <NavItem key={item.href} {...item} pathname={pathname} badge={badgeFor(item.href)} onClick={() => setSidebarOpen(false)} />
                     ))}
                   </div>
                 </div>
