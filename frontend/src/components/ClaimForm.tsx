@@ -834,7 +834,9 @@ export default function ClaimForm() {
         </h3>
         <p className="text-xs text-[#6b7280] mb-4 mt-2">
           If you obtained a pre-authorization for this service, paste its reference below.
-          We&apos;ll verify the patient, validity window, and approved procedure codes — but only when the payer is in our network. Out-of-network payers can&apos;t be verified, so the field is informational in that case.
+          It&apos;s optional and recorded with the claim for your records — the lookup simply
+          lets you confirm you typed the right reference. It doesn&apos;t affect how this claim
+          is scored or adjudicated.
         </p>
         <div className="space-y-3">
           <Input
@@ -856,7 +858,7 @@ export default function ClaimForm() {
           {preAuthLookup.state === "found" && (
             <div className="bg-[#f0fdf4] border border-[#bbf7d0] rounded-lg p-3 text-xs">
               <div className="flex items-center gap-2 font-bold text-[#15803d] mb-2">
-                <CheckCircle className="h-4 w-4" /> Pre-authorisation verified
+                <CheckCircle className="h-4 w-4" /> Pre-authorisation found
               </div>
               <div className="grid grid-cols-2 gap-2 text-[#15803d]">
                 <div><span className="font-bold">Patient:</span> {preAuthLookup.patient_name || "—"}</div>
@@ -875,18 +877,18 @@ export default function ClaimForm() {
           )}
 
           {(preAuthLookup.state === "expired" || preAuthLookup.state === "not_found" || preAuthLookup.state === "not_approved") && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs flex items-start gap-2 text-amber-800">
-              <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+            <div className="bg-[#f0f9ff] border border-[#bae6fd] rounded-lg p-3 text-xs flex items-start gap-2 text-[#0369a1]">
+              <Info className="h-4 w-4 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold">
                   {preAuthLookup.state === "expired"
                     ? "Pre-authorisation expired"
                     : preAuthLookup.state === "not_approved"
-                      ? "Pre-authorisation not approved"
-                      : "Pre-authorisation not found"}
+                      ? "Pre-authorisation not approved yet"
+                      : "No matching pre-authorisation found"}
                 </p>
                 <p>{preAuthLookup.detail}</p>
-                <p className="mt-1">You can still submit, but the insurer will likely deny this claim for missing or invalid authorization.</p>
+                <p className="mt-1">The reference is still saved with the claim for your records — it doesn&apos;t affect how this claim is scored or adjudicated.</p>
               </div>
             </div>
           )}

@@ -11,7 +11,6 @@ from core.security import get_current_user
 from core.database import supabase
 
 from services.ai_services import extract_claim_from_document, extract_claim_from_documents, scrub_claim
-from services.authorization import verify_authorization
 from services.adjudication import adjudicate_claim
 from services import audit
 
@@ -223,20 +222,48 @@ def _resolve_clinic(user_id: str, requested_clinic_id: Optional[str]) -> Optiona
 
 
 def _run_auth_check(claim_data: ClaimFormData, resolved_payer_id: Optional[str]) -> dict:
-    """Cross-checks the claim's own fields against any pre-authorisation it
-    cites — any disagreement yields a `contradiction` verdict."""
-    return verify_authorization(
-        pre_auth_number=claim_data.pre_auth_number,
-        insurer_id=resolved_payer_id,
-        claim={
-            "patient_id": claim_data.patient_id,
-            "patient_name": claim_data.patient_name,
-            "member_id": claim_data.member_id,
-            "diagnosis_codes": claim_data.diagnosis_codes,
-            "procedure_codes": claim_data.procedure_codes,
-            "provider_name": claim_data.provider_name,
-        },
-    )
+    """Records any pre-authorisation reference cited on a claim — but treats it
+    as reference metadata only, with NO influence on scrubbing, scoring, or
+    adjudication. We still resolve the linked pre-auth row (so the claim links
+    back to it for display) but always return a neutral `not_applicable`
+    verdict, so no downstream consumer flags it, caps the score, or feeds it to
+    an LLM. The full claim↔auth cross-check in services/authorization.py is
+    intentionally NOT called here. (Pre-auth's own workflow — issuing an auth
+    number on approval — is unaffected; only its effect on CLAIMS is removed.)"""
+    ref = (claim_data.pre_auth_number or "").strip()
+    if not ref:
+        return {
+            "status": "not_applicable",
+            "detail": "No pre-authorisation reference was supplied with this claim.",
+            "pre_auth_id": None,
+        }
+
+    # Best-effort linkage so the claim still points at the pre-auth row, without
+    # deriving any verdict from it. Failure to resolve is harmless.
+    pre_auth_id = None
+    if resolved_payer_id:
+        try:
+            res = (
+                supabase.table("pre_auth_requests")
+                .select("id")
+                .eq("reference_number", ref)
+                .eq("insurer_id", resolved_payer_id)
+                .maybe_single()
+                .execute()
+            )
+            if res and getattr(res, "data", None):
+                pre_auth_id = res.data["id"]
+        except Exception as e:
+            logger.warning(f"Pre-auth linkage lookup failed for {ref}: {e}")
+
+    return {
+        "status": "not_applicable",
+        "detail": (
+            f"Pre-authorisation {ref} is recorded with this claim for reference "
+            "only and does not affect adjudication."
+        ),
+        "pre_auth_id": pre_auth_id,
+    }
 
 
 async def _scrub(claim_data: ClaimFormData, auth_check: dict, resolved_payer_id: Optional[str]) -> dict:

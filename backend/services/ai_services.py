@@ -952,8 +952,11 @@ def _format_auth_check(auth_check: dict | None) -> str:
     # `not_applicable` covers two distinct cases — disambiguate via the detail
     # so the prompt's downstream rules trigger correctly.
     if status == "not_applicable":
-        if "out-of-network" in detail.lower():
+        d = detail.lower()
+        if "out-of-network" in d:
             head = "NOT VERIFIABLE — The payer is out-of-network. Treat the supplied authorization number as opaque metadata; do NOT flag it."
+        elif "reference only" in d or "does not affect" in d:
+            head = "NOT APPLICABLE — A pre-authorisation reference is recorded for the provider's records only. Do NOT factor it into this review and do NOT flag it."
         else:
             head = "NOT PROVIDED — No pre-authorisation number was supplied with this claim."
         return f"{head}\n{detail}".strip()
